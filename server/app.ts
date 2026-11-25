@@ -12,10 +12,11 @@ const configSchema = z.object({
   startDate: date,
   genres: z.array(z.string().trim().min(1).max(40)).min(1).max(10),
   levels: z.number().int().min(1).max(10),
-  times: z.array(time).max(24).refine((t) => new Set(t).size === t.length, 'Class times must be unique'),
+  weekly: z.array(z.array(z.object({ time, level: z.number().int().min(1) })).max(24)
+    .refine((d) => new Set(d.map((c) => c.time)).size === d.length, 'Each class time can only appear once per day')).length(7),
   durationMin: z.number().int().min(5).max(240),
   timeZone: z.string().refine((tz) => { try { new Intl.DateTimeFormat('en', { timeZone: tz }); return true } catch { return false } }, 'Unknown time zone'),
-})
+}).refine((c) => c.weekly.every((d) => d.every((x) => x.level <= c.levels)), 'A class level is higher than the number of levels')
 const rangeSchema = z.object({ from: date, to: date }).refine((r) => r.from <= r.to && r.to <= addDays(r.from, 400), 'Range must be in order and at most 400 days')
 
 export interface AppOptions { store: Store; client?: MarianaClient; now?: () => Date }
@@ -37,7 +38,7 @@ export function createApp({ store, client, now = () => new Date() }: AppOptions)
   const slots = (from: string, to: string) => generateSlots(from, to, store.data.config, store.data.skips)
   const plan = (from: string, to: string): SyncPlan =>
     planSync(slots(from, to), store.data.pushed, (g, l) => store.data.typeMap[typeKey(g, l)], from, to, nowKey())
-  const note = (s: Slot) => `${s.genre} · Level ${s.level}${s.cycleDay ? ` (rotation day ${s.cycleDay})` : ''}`
+  const note = (s: Slot) => `${s.genre} · Level ${s.level}`
 
   app.get('/api/state', (_req, res) => {
     const c = mt()
@@ -51,7 +52,7 @@ export function createApp({ store, client, now = () => new Date() }: AppOptions)
   app.put('/api/config', (req, res) => {
     const cfg = configSchema.parse(req.body)
     store.data.config = cfg
-    store.log('settings', `Start ${cfg.startDate}, order ${cfg.genres.join(' → ')}, levels 1–${cfg.levels}, times ${cfg.times.join(', ') || 'none'}`)
+    store.log('settings', `Start ${cfg.startDate}, order ${cfg.genres.join(' → ')}, levels 1–${cfg.levels}, ${cfg.weekly.reduce((n, d) => n + d.length, 0)} classes a week`)
     res.json(cfg)
   })
 

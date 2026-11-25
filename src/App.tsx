@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { addDays, dayInfo, typeKey, type RotationConfig, type SkipRule } from '../shared/rotation'
+import { addDays, dayInfo, typeKey, weekdayOf, WEEKDAYS, type ClassTemplate, type RotationConfig, type SkipRule } from '../shared/rotation'
 import { api, type AppState, type LogEntry, type Option, type ImportPlan, type Plan, type PreviewSlot, type PushResult } from './api'
 
 type Tab = 'calendar' | 'settings' | 'mariana' | 'import' | 'activity'
@@ -22,7 +22,7 @@ export default function App() {
         <span className={`conn ${state.connection.mode}`} title={state.connection.label}>{state.connection.mode === 'live' ? `Mariana Tek: ${state.connection.label}` : 'Demo mode, not connected to Mariana Tek'}</span>
       </header>
       <nav>
-        {([['calendar', 'Calendar'], ['settings', 'Rotation settings'], ['mariana', 'Mariana Tek'], ['import', 'Import CSV'], ['activity', 'Activity']] as const).map(([id, label]) => (
+        {([['calendar', 'Calendar'], ['settings', 'Weekly schedule & rotation'], ['mariana', 'Mariana Tek'], ['import', 'Import CSV'], ['activity', 'Activity']] as const).map(([id, label]) => (
           <button key={id} className={tab === id ? 'on' : ''} onClick={() => setTab(id)}>{label}</button>
         ))}
       </nav>
@@ -58,7 +58,7 @@ function CalendarView({ state }: { state: AppState }) {
           {upcoming.map((d) => { const i = dayInfo(d, cfg); return (
             <button key={d} className={`chip ${d === selected ? 'sel' : ''}`} style={{ borderColor: genreColor(cfg, i.genre) }} onClick={() => { setSelected(d); setMonth(d.slice(0, 7)) }}>
               <small>{d === state.today ? 'Today' : fmtDate(d, { weekday: 'short', day: 'numeric' })}</small>
-              <b style={{ color: genreColor(cfg, i.genre) }}>{i.genre}</b><span>Level {i.level}</span>
+              <b style={{ color: genreColor(cfg, i.genre) }}>{i.genre}</b><span>{cfg.weekly[i.weekday].length} classes</span>
             </button>) })}
         </div>
       </section>
@@ -73,9 +73,9 @@ function CalendarView({ state }: { state: AppState }) {
           <div className="grid">
             {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((d) => <div key={d} className="dow">{d}</div>)}
             {days.map((d) => { const i = dayInfo(d, cfg); const n = byDate.get(d)?.length ?? 0; return (
-              <button key={d} className={`day ${d.slice(0, 7) !== month ? 'out' : ''} ${d === state.today ? 'today' : ''} ${d === selected ? 'sel' : ''}`} onClick={() => setSelected(d)} aria-label={`${fmtDate(d)}: ${i.genre} level ${i.level}`}>
+              <button key={d} className={`day ${d.slice(0, 7) !== month ? 'out' : ''} ${d === state.today ? 'today' : ''} ${d === selected ? 'sel' : ''}`} onClick={() => setSelected(d)} aria-label={`${fmtDate(d)}: ${i.genre}`}>
                 <span className="num">{Number(d.slice(8))}</span>
-                <span className="tag" style={{ background: genreColor(cfg, i.genre) }}>{i.genre.slice(0, 3)} {i.level}</span>
+                <span className="tag" style={{ background: genreColor(cfg, i.genre) }}>{i.genre}</span>
                 <span className="count">{n} {n === 1 ? 'class' : 'classes'}</span>
               </button>) })}
           </div>
@@ -83,8 +83,8 @@ function CalendarView({ state }: { state: AppState }) {
         </section>
         <section className="card">
           <h2>{fmtDate(selected, { weekday: 'long', month: 'long', day: 'numeric' })}</h2>
-          <p className="big" style={{ color: genreColor(cfg, sel.genre) }}>{sel.genre} · Level {sel.level}</p>
-          <p className="muted">Rotation day {sel.cycleDay} of {cfg.genres.length * cfg.levels}</p>
+          <p className="big" style={{ color: genreColor(cfg, sel.genre) }}>{sel.genre}</p>
+          <p className="muted">Rotation day {sel.cycleDay} of {cfg.genres.length} · same times and levels every {WEEKDAYS[sel.weekday]}</p>
           <ul className="classes">
             {(byDate.get(selected) ?? []).map((s) => (
               <li key={s.key}><span>{fmtTime(s.time)} – {fmtTime(s.end)}</span><b>{s.genre} {s.level}</b><em className={s.mtId ? 'ok' : ''}>{s.mtId ? 'In Mariana Tek' : 'Not pushed'}</em></li>
@@ -97,24 +97,72 @@ function CalendarView({ state }: { state: AppState }) {
   )
 }
 
+const DAY_ORDER = [1, 2, 3, 4, 5, 6, 0]
+const COPY_TARGETS: Record<string, number[]> = { all: [0, 1, 2, 3, 4, 5, 6], weekdays: [1, 2, 3, 4, 5], weekend: [0, 6] }
+
+function DayEditor({ day, classes, levels, onChange, onCopy }: { day: number; classes: ClassTemplate[]; levels: number; onChange: (c: ClassTemplate[]) => void; onCopy: (target: string) => void }) {
+  const [time, setTime] = useState('')
+  const [level, setLevel] = useState(1)
+  const sorted = [...classes].sort((a, b) => a.time.localeCompare(b.time))
+  return (
+    <div className="dayrow">
+      <b className="dayname">{WEEKDAYS[day]}</b>
+      <div className="times">
+        {sorted.map((c) => (
+          <span key={c.time} className="pill">{fmtTime(c.time)}
+            <select aria-label={`${WEEKDAYS[day]} ${c.time} level`} value={c.level} onChange={(e) => onChange(classes.map((x) => (x.time === c.time ? { ...x, level: Number(e.target.value) } : x)))}>
+              {Array.from({ length: levels }, (_, l) => <option key={l} value={l + 1}>L{l + 1}</option>)}
+            </select>
+            <button onClick={() => onChange(classes.filter((x) => x.time !== c.time))} aria-label={`Remove ${WEEKDAYS[day]} ${c.time}`}>×</button>
+          </span>
+        ))}
+        {!classes.length && <span className="muted">No classes</span>}
+      </div>
+      <div className="row wrap adder">
+        <input type="time" value={time} onChange={(e) => setTime(e.target.value)} aria-label={`New ${WEEKDAYS[day]} class time`} />
+        <select value={level} onChange={(e) => setLevel(Number(e.target.value))} aria-label={`New ${WEEKDAYS[day]} class level`}>
+          {Array.from({ length: levels }, (_, l) => <option key={l} value={l + 1}>Level {l + 1}</option>)}
+        </select>
+        <button disabled={!time || classes.some((c) => c.time === time)} onClick={() => { onChange([...classes, { time, level }]); setTime('') }}>Add</button>
+        <select value="" onChange={(e) => e.target.value && onCopy(e.target.value)} aria-label={`Copy ${WEEKDAYS[day]}`}>
+          <option value="">Copy to…</option><option value="weekdays">Mon–Fri</option><option value="weekend">Sat & Sun</option><option value="all">Every day</option>
+        </select>
+      </div>
+    </div>
+  )
+}
+
 function Settings({ state, onSaved }: { state: AppState; onSaved: () => void }) {
   const [cfg, setCfg] = useState<RotationConfig>(state.config)
   const [skips, setSkips] = useState<SkipRule[]>(state.skips)
-  const [newTime, setNewTime] = useState('')
   const [skip, setSkip] = useState<SkipRule>({ date: '', time: '', note: '' })
   const [msg, setMsg] = useState('')
-  const set = (p: Partial<RotationConfig>) => setCfg({ ...cfg, ...p })
+  const set = (p: Partial<RotationConfig>) => { setCfg({ ...cfg, ...p }); setMsg('') }
   const move = (i: number, d: number) => { const g = [...cfg.genres]; [g[i], g[i + d]] = [g[i + d], g[i]]; set({ genres: g }) }
+  const setDay = (day: number, classes: ClassTemplate[]) => set({ weekly: cfg.weekly.map((c, i) => (i === day ? classes : c)) })
+  const copyDay = (day: number, target: string) => set({ weekly: cfg.weekly.map((c, i) => (COPY_TARGETS[target].includes(i) ? cfg.weekly[day].map((x) => ({ ...x })) : c)) })
   const save = async () => {
     try { await api.saveConfig(cfg); await api.saveSkips(skips); setMsg('Saved. Use the Mariana Tek tab to push the changes.'); onSaved() } catch (e) { setMsg((e as Error).message) }
   }
-  const preview = Array.from({ length: cfg.genres.length * cfg.levels }, (_, i) => dayInfo(addDays(cfg.startDate, i), cfg))
+  const allTimes = [...new Set(cfg.weekly.flat().map((c) => c.time))].sort()
+  const perWeek = cfg.weekly.reduce((n, d) => n + d.length, 0)
+  const preview = Array.from({ length: 14 }, (_, i) => addDays(state.today, i))
   return (
     <div className="stack">
       <section className="card form">
-        <h2>Rotation</h2>
+        <h2>1. Weekly schedule</h2>
+        <p className="muted">Set each day's class times and levels. Every Monday gets Monday's schedule, and so on. {perWeek} classes a week.</p>
+        {DAY_ORDER.map((d) => <DayEditor key={d} day={d} classes={cfg.weekly[d]} levels={cfg.levels} onChange={(c) => setDay(d, c)} onCopy={(t) => copyDay(d, t)} />)}
+        <div className="two">
+          <label>Number of levels<input type="number" min={1} max={10} value={cfg.levels} onChange={(e) => set({ levels: Number(e.target.value) })} /></label>
+          <label>Class length (minutes)<input type="number" min={5} max={240} value={cfg.durationMin} onChange={(e) => set({ durationMin: Number(e.target.value) })} /></label>
+        </div>
+      </section>
+      <section className="card form">
+        <h2>2. Genre rotation</h2>
+        <p className="muted">The genre moves to the next one every day, including weekends and holidays. It applies to every class that day.</p>
         <label>Day 1 date<input type="date" value={cfg.startDate} onChange={(e) => set({ startDate: e.target.value })} /></label>
-        <p className="muted">This date is {cfg.genres[0]} Level 1. The studio is open every day, so the rotation counts every calendar day.</p>
+        <p className="muted">This date is {cfg.genres[0]}.</p>
         <div className="field"><span>Genre order</span>
           {cfg.genres.map((g, i) => (
             <div className="row" key={i}>
@@ -124,28 +172,23 @@ function Settings({ state, onSaved }: { state: AppState; onSaved: () => void }) 
             </div>
           ))}
         </div>
-        <div className="two">
-          <label>Number of levels<input type="number" min={1} max={10} value={cfg.levels} onChange={(e) => set({ levels: Number(e.target.value) })} /></label>
-          <label>Class length (minutes)<input type="number" min={5} max={240} value={cfg.durationMin} onChange={(e) => set({ durationMin: Number(e.target.value) })} /></label>
-        </div>
         <label>Studio time zone<input value={cfg.timeZone} onChange={(e) => set({ timeZone: e.target.value })} /></label>
-        <div className="field"><span>Daily class times (every day of the week)</span>
-          <div className="times">
-            {[...cfg.times].sort().map((t) => <span key={t} className="pill">{fmtTime(t)}<button onClick={() => set({ times: cfg.times.filter((x) => x !== t) })} aria-label={`Remove ${t}`}>×</button></span>)}
-          </div>
-          <div className="row"><input type="time" value={newTime} onChange={(e) => setNewTime(e.target.value)} aria-label="New class time" />
-            <button disabled={!newTime || cfg.times.includes(newTime)} onClick={() => { set({ times: [...cfg.times, newTime] }); setNewTime('') }}>Add time</button></div>
-        </div>
-        <div className="field"><span>One full cycle ({preview.length} days)</span>
-          <div className="cycle">{preview.map((p) => <span key={p.cycleDay} style={{ background: genreColor(cfg, p.genre) }}>Day {p.cycleDay}<br /><b>{p.genre} {p.level}</b></span>)}</div>
-        </div>
+      </section>
+      <section className="card">
+        <h2>Preview: next 2 weeks</h2>
+        <div className="tablewrap"><table className="preview">
+          <thead><tr><th>Date</th><th>Genre</th>{allTimes.map((t) => <th key={t}>{fmtTime(t)}</th>)}</tr></thead>
+          <tbody>{preview.map((d) => { const i = dayInfo(d, cfg); const day = cfg.weekly[weekdayOf(d)]; return (
+            <tr key={d}><td>{fmtDate(d)}</td><td><span className="tag" style={{ background: genreColor(cfg, i.genre) }}>{i.genre}</span></td>
+              {allTimes.map((t) => { const c = day.find((x) => x.time === t); return <td key={t}>{c ? `L${c.level}` : ''}</td> })}</tr>) })}</tbody>
+        </table></div>
       </section>
       <section className="card form">
         <h2>Skipped classes</h2>
         <p className="muted">Optional. Skipping a class removes it but does not shift the rotation.</p>
         <div className="row wrap">
           <input type="date" value={skip.date} onChange={(e) => setSkip({ ...skip, date: e.target.value })} aria-label="Skip date" />
-          <select value={skip.time} onChange={(e) => setSkip({ ...skip, time: e.target.value })} aria-label="Skip time"><option value="">All classes that day</option>{[...cfg.times].sort().map((t) => <option key={t} value={t}>{fmtTime(t)}</option>)}</select>
+          <select value={skip.time} onChange={(e) => setSkip({ ...skip, time: e.target.value })} aria-label="Skip time"><option value="">All classes that day</option>{(skip.date ? cfg.weekly[weekdayOf(skip.date)].map((c) => c.time).sort() : allTimes).map((t) => <option key={t} value={t}>{fmtTime(t)}</option>)}</select>
           <input placeholder="Note (optional)" value={skip.note} onChange={(e) => setSkip({ ...skip, note: e.target.value })} />
           <button disabled={!skip.date} onClick={() => { setSkips([...skips, { date: skip.date, ...(skip.time ? { time: skip.time } : {}), ...(skip.note ? { note: skip.note } : {}) }]); setSkip({ date: '', time: '', note: '' }) }}>Add</button>
         </div>

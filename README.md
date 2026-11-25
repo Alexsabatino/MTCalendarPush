@@ -2,13 +2,12 @@
 
 Plans a rotating class schedule and creates each class in **Mariana Tek**, which can only repeat a class on fixed weekdays.
 
-The rotation (defaults, all editable in the app):
+How the schedule is built:
 
-| Day | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 |
-|---|---|---|---|---|---|---|---|---|---|
-| Class | Strength 1 | Endurance 1 | Longevity 1 | Strength 2 | Endurance 2 | Longevity 2 | Strength 3 | Endurance 3 | Longevity 3 |
+1. **Weekly schedule:** for each day of the week, set the class times and each class's level. Every Monday uses Monday's times and levels, and so on.
+2. **Genre rotation:** the genre moves to the next one every calendar day (Strength → Endurance → Longevity → Strength …), starting from the Day 1 date. The studio is open every day, so weekends and holidays count. Every class that day gets that day's genre.
 
-Day 10 starts over at Strength 1. The studio is open every day, so every calendar day counts. All classes on a day share that day's genre and level. Classes are 50 minutes.
+Example: if Monday is 6:00 L1 and 9:00 L3, one Monday's classes might be Strength 1 and Strength 3, the next Monday's Endurance 1 and Endurance 3. Classes are 50 minutes.
 
 ## Run it (Windows PowerShell)
 
@@ -23,7 +22,7 @@ Open the `Local:` link it prints. Without Mariana Tek credentials it runs in **d
 
 ## Using it
 
-1. **Rotation settings:** Day 1 date, genre order, number of levels, daily class times, class length, time zone, and optional skipped classes (skipping removes a class but does not shift the rotation).
+1. **Weekly schedule & rotation:** each weekday's class times and levels (with Copy to Mon–Fri / weekend / every day), Day 1 date, genre order, number of levels, class length, time zone, a 2-week preview, and optional skipped classes (skipping removes a class but does not shift the rotation).
 2. **Calendar:** month view and the next 9 days.
 3. **Mariana Tek:** match each genre/level to a Mariana Tek class type and pick the room layout, choose how far ahead to schedule, preview the changes, then push. A CSV export is also available.
 4. **Import CSV:** upload a whole schedule and push it in one go. The file replaces the rotation for the classes it lists.

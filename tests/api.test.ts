@@ -5,6 +5,7 @@ import { LiveMariana } from '../server/mariana'
 import { Store } from '../server/store'
 
 let server: Server, base = ''
+const weekly = (...c: [string, number][]) => Array.from({ length: 7 }, () => c.map(([time, level]) => ({ time, level })))
 const store = new Store(null)
 const now = () => new Date('2026-11-30T12:00:00-05:00')
 const call = async (method: string, path: string, body?: unknown) => {
@@ -22,14 +23,14 @@ afterAll(() => server.close())
 describe('API (demo Mariana Tek)', () => {
   const range = { from: '2026-12-01', to: '2026-12-09' }
   it('saves settings and previews the rotation', async () => {
-    const r = await call('PUT', '/api/config', { startDate: '2026-12-01', genres: ['Strength', 'Endurance', 'Longevity'], levels: 3, times: ['06:00', '17:30'], durationMin: 50, timeZone: 'America/New_York' })
+    const r = await call('PUT', '/api/config', { startDate: '2026-12-01', genres: ['Strength', 'Endurance', 'Longevity'], levels: 3, weekly: weekly(['06:00', 1], ['17:30', 3]), durationMin: 50, timeZone: 'America/New_York' })
     expect(r.status).toBe(200)
     const p = await call('GET', '/api/preview?from=2026-12-01&to=2026-12-09')
     expect(p.body).toHaveLength(18)
     expect(p.body[17]).toMatchObject({ genre: 'Longevity', level: 3, end: '18:20' })
   })
   it('rejects bad settings', async () => {
-    const r = await call('PUT', '/api/config', { startDate: 'x', genres: [], levels: 0, times: ['25:00'], durationMin: 50, timeZone: 'Nowhere' })
+    const r = await call('PUT', '/api/config', { startDate: 'x', genres: [], levels: 0, weekly: weekly(['25:00', 1]), durationMin: 50, timeZone: 'Nowhere' })
     expect(r.status).toBe(400)
   })
   it('requires mapping before pushing, then pushes without duplicates', async () => {
@@ -56,7 +57,7 @@ describe('API (demo Mariana Tek)', () => {
     expect(r.body.flagged[0].key).toBe('2026-12-02T06:00')
   })
   it('removes unbooked future classes when a time is dropped', async () => {
-    await call('PUT', '/api/config', { ...store.data.config, times: ['06:00'] })
+    await call('PUT', '/api/config', { ...store.data.config, weekly: weekly(['06:00', 1]) })
     const r = await call('POST', '/api/sync/apply', range)
     expect(r.body.removed).toBe(9)
   })

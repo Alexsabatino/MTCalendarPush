@@ -1,11 +1,20 @@
+export interface ClassTemplate {
+  time: string
+  level: number
+}
+
 export interface RotationConfig {
   startDate: string
   genres: string[]
   levels: number
-  times: string[]
+  /** Class times and levels for each weekday, index 0 = Sunday. Same every week. */
+  weekly: ClassTemplate[][]
   durationMin: number
   timeZone: string
 }
+
+export const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
+const weekday = (times: [string, number][]) => times.map(([time, level]) => ({ time, level }))
 
 export interface SkipRule {
   date: string
@@ -26,7 +35,11 @@ export const DEFAULT_CONFIG: RotationConfig = {
   startDate: '2026-12-01',
   genres: ['Strength', 'Endurance', 'Longevity'],
   levels: 3,
-  times: ['06:00', '09:00', '12:00', '17:30'],
+  weekly: [
+    weekday([['08:00', 1], ['10:00', 2]]),
+    ...Array.from({ length: 5 }, () => weekday([['06:00', 1], ['09:00', 2], ['12:00', 1], ['17:30', 3]])),
+    weekday([['08:00', 2], ['10:00', 1]]),
+  ],
   durationMin: 50,
   timeZone: 'America/New_York',
 }
@@ -40,27 +53,23 @@ export const addDays = (date: string, n: number) => new Date(toUtc(date) + n * D
 export const daysBetween = (a: string, b: string) => Math.round((toUtc(b) - toUtc(a)) / DAY_MS)
 const mod = (n: number, m: number) => ((n % m) + m) % m
 
-export function cycleLength(cfg: RotationConfig) {
-  return cfg.genres.length * cfg.levels
-}
+export const weekdayOf = (date: string) => new Date(toUtc(date)).getUTCDay()
 
-/** Day 1 is the first genre at level 1; each genre goes up one level every time it comes back around. */
+/** The genre moves to the next one every calendar day; Day 1 is the first genre. */
 export function dayInfo(date: string, cfg: RotationConfig) {
-  const offset = mod(daysBetween(cfg.startDate, date), cycleLength(cfg))
-  const g = cfg.genres.length
-  return { cycleDay: offset + 1, genre: cfg.genres[offset % g], level: Math.floor(offset / g) + 1 }
+  const offset = mod(daysBetween(cfg.startDate, date), cfg.genres.length)
+  return { cycleDay: offset + 1, genre: cfg.genres[offset], weekday: weekdayOf(date) }
 }
 
 export const slotKey = (date: string, time: string) => `${date}T${time}`
 
 export function generateSlots(from: string, to: string, cfg: RotationConfig, skips: SkipRule[] = []): Slot[] {
   const out: Slot[] = []
-  const times = [...cfg.times].sort()
   for (let date = from; date <= to; date = addDays(date, 1)) {
-    const info = dayInfo(date, cfg)
-    for (const time of times) {
+    const { cycleDay, genre, weekday } = dayInfo(date, cfg)
+    for (const { time, level } of [...(cfg.weekly[weekday] ?? [])].sort((a, b) => a.time.localeCompare(b.time))) {
       if (skips.some((s) => s.date === date && (!s.time || s.time === time))) continue
-      out.push({ key: slotKey(date, time), date, time, ...info })
+      out.push({ key: slotKey(date, time), date, time, genre, level, cycleDay })
     }
   }
   return out

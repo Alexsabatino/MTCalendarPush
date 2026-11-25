@@ -72,3 +72,12 @@ summary { cursor: pointer; font-size: 14px; }
 .stack > *, .split > *, .card { min-width: 0; }
 .form > button.ghost { justify-self: start; }
 @media (max-width: 800px) { .app { padding: 10px; } .strip { grid-template-columns: repeat(9, 92px); } }
+.tag { max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+.dayrow { display: grid; grid-template-columns: 110px 1fr; gap: 8px 12px; align-items: center; padding: 10px 0; border-top: 1px solid var(--line); }
+.dayrow .adder { grid-column: 2; }
+.dayrow .adder input { flex: 0 0 auto; }
+.pill select { border: 0; background: transparent; padding: 2px; font-weight: 600; }
+.tablewrap { overflow-x: auto; }
+table.preview { border-collapse: collapse; width: 100%; font-size: 13px; }
+.preview th, .preview td { padding: 6px 8px; border-bottom: 1px solid var(--line); text-align: left; white-space: nowrap; }
+@media (max-width: 800px) { .dayrow { grid-template-columns: 1fr; } .dayrow .adder { grid-column: 1; } }

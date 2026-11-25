@@ -32,7 +32,12 @@ export class Store {
   data: StoreData
   constructor(private file: string | null) {
     this.data = fresh()
-    if (file && fs.existsSync(file)) this.data = { ...fresh(), ...JSON.parse(fs.readFileSync(file, 'utf8')) }
+    if (file && fs.existsSync(file)) {
+      const saved = JSON.parse(fs.readFileSync(file, 'utf8'))
+      const config = { ...DEFAULT_CONFIG, ...saved.config }
+      delete config.times
+      this.data = { ...fresh(), ...saved, config }
+    }
   }
   save() {
     if (!this.file) return
