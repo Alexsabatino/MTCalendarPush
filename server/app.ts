@@ -1,7 +1,7 @@
 import express from 'express'
 import { z } from 'zod'
 import { addDays, endTime, generateSlots, nowTimeIn, todayIn, typeKey, type Slot } from '../shared/rotation'
-import { planSync, type SyncPlan } from '../shared/sync'
+import { classLabel, planSync, type SyncPlan } from '../shared/sync'
 import { importSchedule } from '../shared/csvImport'
 import { DemoMariana, LiveMariana, MarianaError, type MarianaClient } from './mariana'
 import { Store } from './store'
@@ -18,6 +18,8 @@ const configSchema = z.object({
   timeZone: z.string().refine((tz) => { try { new Intl.DateTimeFormat('en', { timeZone: tz }); return true } catch { return false } }, 'Unknown time zone'),
 }).refine((c) => c.weekly.every((d) => d.every((x) => x.level <= c.levels)), 'A class level is higher than the number of levels')
 const rangeSchema = z.object({ from: date, to: date }).refine((r) => r.from <= r.to && r.to <= addDays(r.from, 400), 'Range must be in order and at most 400 days')
+
+type Mode = 'all' | 'weekly' | 'genre'
 
 export interface AppOptions { store: Store; client?: MarianaClient; now?: () => Date }
 
@@ -36,9 +38,23 @@ export function createApp({ store, client, now = () => new Date() }: AppOptions)
     return `${todayIn(tz, now())}T${nowTimeIn(tz, now())}`
   }
   const slots = (from: string, to: string) => generateSlots(from, to, store.data.config, store.data.skips, store.data.changes)
-  const plan = (from: string, to: string): SyncPlan =>
-    planSync(slots(from, to), store.data.pushed, (g, l) => store.data.typeMap[typeKey(g, l)], from, to, nowKey())
-  const note = (s: Slot) => `${s.genre} · Level ${s.level}`
+  const typeFor = (g: string, l: number) => store.data.typeMap[typeKey(g, l)]
+  /**
+   * all: classes with their genre. weekly: times and levels only (genre left blank, but kept on classes that already have one and on one-date changes).
+   * genre: only sets the genre on classes the weekly push already created.
+   */
+  const plan = (from: string, to: string, mode: Mode = 'all'): SyncPlan & { waiting: number } => {
+    const want = slots(from, to)
+    const pushed = new Map(store.data.pushed.map((p) => [p.key, p]))
+    const nk = nowKey()
+    if (mode === 'weekly') return { ...planSync(want.map((s) => (pushed.get(s.key)?.genre || s.changed ? s : { ...s, genre: '' })), store.data.pushed, typeFor, from, to, nk), waiting: 0 }
+    if (mode === 'genre') {
+      const waiting = want.filter((s) => s.key > nk && !pushed.has(s.key)).length
+      return { ...planSync(want.filter((s) => pushed.has(s.key)), store.data.pushed, typeFor, from, to, nk, { remove: false }), waiting }
+    }
+    return { ...planSync(want, store.data.pushed, typeFor, from, to, nk), waiting: 0 }
+  }
+  const note = (s: Slot) => (s.genre ? `${s.genre} · Level ${s.level}` : `Level ${s.level}`)
 
   app.get('/api/state', (_req, res) => {
     const c = mt()
@@ -74,7 +90,7 @@ export function createApp({ store, client, now = () => new Date() }: AppOptions)
   app.get('/api/preview', (req, res) => {
     const { from, to } = rangeSchema.parse(req.query)
     const pushed = new Map(store.data.pushed.map((p) => [p.key, p]))
-    res.json(slots(from, to).map((s) => ({ ...s, end: endTime(s.time, store.data.config.durationMin), mtId: pushed.get(s.key)?.mtId ?? null })))
+    res.json(slots(from, to).map((s) => ({ ...s, end: endTime(s.time, store.data.config.durationMin), mtId: pushed.get(s.key)?.mtId ?? null, mtGenre: pushed.get(s.key)?.genre ?? null })))
   })
 
   app.get('/api/mariana/options', async (_req, res) => {
@@ -90,10 +106,12 @@ export function createApp({ store, client, now = () => new Date() }: AppOptions)
     res.json(body)
   })
 
+  const syncBody = z.intersection(rangeSchema, z.object({ mode: z.enum(['all', 'weekly', 'genre']).default('all') }))
+  const planJson = (p: SyncPlan) => ({ create: p.create, update: p.update.map((u) => ({ slot: u.slot, mtId: u.pushed.mtId, from: classLabel(u.pushed.genre, u.pushed.level) })), remove: p.remove, unchanged: p.unchanged, missingTypes: p.missingTypes })
   app.post('/api/sync/plan', (req, res) => {
-    const { from, to } = rangeSchema.parse(req.body)
-    const p = plan(from, to)
-    res.json({ create: p.create, update: p.update.map((u) => ({ slot: u.slot, mtId: u.pushed.mtId, from: `${u.pushed.genre} L${u.pushed.level}` })), remove: p.remove, unchanged: p.unchanged, missingTypes: p.missingTypes })
+    const { from, to, mode } = syncBody.parse(req.body)
+    const p = plan(from, to, mode)
+    res.json({ ...planJson(p), waiting: p.waiting })
   })
 
   const applyPlan = async (p: SyncPlan, label: string) => {
@@ -111,7 +129,7 @@ export function createApp({ store, client, now = () => new Date() }: AppOptions)
     for (const u of p.update) {
       try {
         const booked = await c.reservationCount(u.pushed.mtId)
-        if (booked > 0) { result.flagged.push({ key: u.slot.key, mtId: u.pushed.mtId, reason: `${booked} booking(s); should change from ${u.pushed.genre} L${u.pushed.level} to ${u.slot.genre} L${u.slot.level}` }); continue }
+        if (booked > 0) { result.flagged.push({ key: u.slot.key, mtId: u.pushed.mtId, reason: `${booked} booking(s); should change from ${classLabel(u.pushed.genre, u.pushed.level)} to ${classLabel(u.slot.genre, u.slot.level)}` }); continue }
         await c.changeClassType(u.pushed.mtId, u.typeId, note(u.slot))
         Object.assign(u.pushed, { genre: u.slot.genre, level: u.slot.level, typeId: u.typeId })
         store.save()
@@ -136,11 +154,11 @@ export function createApp({ store, client, now = () => new Date() }: AppOptions)
       : p.missingTypes.length ? `Map a Mariana Tek class type for: ${p.missingTypes.join(', ')}` : null
 
   app.post('/api/sync/apply', async (req, res) => {
-    const { from, to } = rangeSchema.parse(req.body)
-    const p = plan(from, to)
+    const { from, to, mode } = syncBody.parse(req.body)
+    const p = plan(from, to, mode)
     const err = readyError(p)
     if (err) return res.status(400).json({ error: err })
-    res.json(await applyPlan(p, `Rotation ${from} to ${to}`))
+    res.json(await applyPlan(p, `${{ all: 'Classes', weekly: 'Weekly classes (times & levels)', genre: 'Genre rotation' }[mode]} ${from} to ${to}`))
   })
 
   const importBody = z.object({ csv: z.string().max(2_000_000), removeMissing: z.boolean().default(false), weekStart: date.optional() })
@@ -162,8 +180,7 @@ export function createApp({ store, client, now = () => new Date() }: AppOptions)
     res.json({
       format: parsed.format, needsWeekStart: !!parsed.needsWeekStart, genreFromRotation: parsed.genreFromRotation ?? 0,
       rows: parsed.slots.length, errors: parsed.errors, from: parsed.from, to: parsed.to, past,
-      create: p.create, update: p.update.map((u) => ({ slot: u.slot, mtId: u.pushed.mtId, from: `${u.pushed.genre} L${u.pushed.level}` })),
-      remove: p.remove, unchanged: p.unchanged, missingTypes: p.missingTypes,
+      ...planJson(p),
     })
   })
 

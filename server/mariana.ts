@@ -119,7 +119,8 @@ export class DemoMariana implements MarianaClient {
   label = 'Demo studio (not a real Mariana Tek site)'
   constructor(private state: { classes: DemoClass[]; nextId: number }, private persist: () => void) {}
   static types(genres: string[], levels: number): MtOption[] {
-    return genres.flatMap((g, gi) => Array.from({ length: levels }, (_, li) => ({ id: `demo-type-${gi + 1}${li + 1}`, name: `${g} ${li + 1}`, detail: '50 min' })))
+    const byLevel = Array.from({ length: levels }, (_, li) => ({ id: `demo-type-0${li + 1}`, name: `Level ${li + 1}`, detail: '50 min' }))
+    return [...byLevel, ...genres.flatMap((g, gi) => Array.from({ length: levels }, (_, li) => ({ id: `demo-type-${gi + 1}${li + 1}`, name: `${g} ${li + 1}`, detail: '50 min' })))]
   }
   genres: string[] = []
   levels = 3

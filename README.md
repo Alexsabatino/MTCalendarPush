@@ -2,12 +2,14 @@
 
 Plans a rotating class schedule and creates each class in **Mariana Tek**, which can only repeat a class on fixed weekdays.
 
-How the schedule is built:
+It works in two pushes:
 
-1. **Weekly schedule:** for each day of the week, set the class times and each class's level. Every Monday uses Monday's times and levels, and so on.
-2. **Genre rotation:** the genre moves to the next one every calendar day (Strength → Endurance → Longevity → Strength …), starting from the Day 1 date. The studio is open every day, so weekends and holidays count. Every class that day gets that day's genre.
+1. **Weekly classes** tab: set each day's class times and levels (every Monday uses Monday's, and so on), then push. Every class goes into Mariana Tek at its time with a level-only class type (`Level 1/2/3`), usually months ahead.
+2. **Genre rotation** tab: set the Day 1 date and genre order, then push. The genre moves to the next one every calendar day (Strength → Endurance → Longevity …), weekends and holidays included, and each class already in Mariana Tek is switched to its genre's class type (`Level 2` → `Strength 2`), usually about 3 weeks at a time. It never adds or removes classes.
 
-**Importing your weekly grid:** on the Weekly schedule tab, open **Import from a spreadsheet**. Use a sheet with times down the first column (e.g. `6:15 AM`) and day names across the top row, and `Level 1/2/3` somewhere in each cell. Emoji, percentages and other text are ignored; blank or `-` means no class. Upload it as CSV (Google Sheets: File → Download → CSV) or paste cells copied from the sheet. Days missing from the sheet keep their current schedule. Check the result, click **Save settings**, then push from the Mariana Tek tab.
+Re-pushing either one only sends what changed. Changing the weekly schedule later keeps the genre on classes that already have one.
+
+**Importing your weekly grid:** on the Weekly classes tab, open **Import from a spreadsheet**. Use a sheet with times down the first column (e.g. `6:15 AM`) and day names across the top row, and `Level 1/2/3` somewhere in each cell. Emoji, percentages and other text are ignored; blank or `-` means no class. Upload it as CSV (Google Sheets: File → Download → CSV) or paste cells copied from the sheet. Days missing from the sheet keep their current schedule. Check the result, click **Save settings**, then push.
 
 **Quick one-date changes:** on the Calendar tab, click a date to change a class's genre or level, cancel it, or add an extra class, for that date only (a dot marks changed dates). The bar at the top shows how many changes aren't in Mariana Tek yet; **Push changes** sends only those.
 
@@ -26,10 +28,11 @@ Open the `Local:` link it prints. Without Mariana Tek credentials it runs in **d
 
 ## Using it
 
-1. **Weekly schedule & rotation:** each weekday's class times and levels (with Copy to Mon–Fri / weekend / every day), Day 1 date, genre order, number of levels, class length, time zone, a 2-week preview, and optional skipped classes (skipping removes a class but does not shift the rotation).
-2. **Calendar:** month view and the next 9 days.
-3. **Mariana Tek:** match each genre/level to a Mariana Tek class type and pick the room layout, choose how far ahead to schedule, preview the changes, then push. A CSV export is also available.
-4. **Import CSV:** upload a whole schedule and push it in one go. The file replaces the rotation for the classes it lists.
+1. **Mariana Tek setup** (once): match class types — one per level for the weekly push (`Level 1–3`) and one per genre and level for the genre push (`Strength 1` … `Longevity 3`) — and pick the room layout.
+2. **Weekly classes:** each weekday's times and levels (Copy to Mon–Fri / weekend / every day), the week at a glance, skipped classes, and the weekly push.
+3. **Genre rotation:** Day 1 date, genre order, time zone, a 2-week preview, CSV export, and the genre push.
+4. **Calendar:** month view, next 9 days, and one-date changes with a **Push changes** bar.
+5. **Import schedule:** upload a whole schedule and push it in one go. The file replaces the rotation for the classes it lists.
 
 ### Importing a schedule (e.g. from Gemini)
 

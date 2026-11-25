@@ -95,3 +95,5 @@ table.preview { border-collapse: collapse; width: 100%; font-size: 13px; }
 .classes.edit select { padding: 4px 6px; }
 .classes li.cancelled b { color: #a3361b; }
 .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: #e0a100; margin-left: 4px; vertical-align: middle; }
+.preview.week td.lvl1 { color: #19803f; } .preview.week td.lvl2 { color: #9a6a00; } .preview.week td.lvl3 { color: #a3361b; }
+.preview.week tfoot td { font-weight: 600; border-top: 2px solid var(--line); }

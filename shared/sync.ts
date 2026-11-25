@@ -3,6 +3,7 @@ import type { Slot } from './rotation'
 export interface PushedClass {
   key: string
   mtId: string
+  /** Empty until the genre rotation has been pushed to this class. */
   genre: string
   level: number
   typeId: string
@@ -17,6 +18,8 @@ export interface SyncPlan {
   missingTypes: string[]
 }
 
+export const classLabel = (genre: string, level: number) => (genre ? `${genre} L${level}` : `Level ${level}`)
+
 /**
  * Compares the planned rotation against classes this tool already created in Mariana Tek.
  * Only future classes inside [from, to] are touched; past classes are never changed.
@@ -28,6 +31,7 @@ export function planSync(
   from: string,
   to: string,
   now: string,
+  opts: { remove?: boolean } = {},
 ): SyncPlan {
   const plan: SyncPlan = { create: [], update: [], remove: [], unchanged: 0, missingTypes: [] }
   const future = (key: string) => key > now
@@ -38,7 +42,7 @@ export function planSync(
     wanted.add(slot.key)
     const typeId = typeFor(slot.genre, slot.level)
     if (!typeId) {
-      const label = `${slot.genre} L${slot.level}`
+      const label = classLabel(slot.genre, slot.level)
       if (!plan.missingTypes.includes(label)) plan.missingTypes.push(label)
       continue
     }
@@ -47,6 +51,7 @@ export function planSync(
     else if (existing.typeId !== typeId) plan.update.push({ slot, pushed: existing, typeId })
     else plan.unchanged++
   }
+  if (opts.remove === false) return plan
   for (const p of pushed) {
     const date = p.key.slice(0, 10)
     if (date < from || date > to || !future(p.key)) continue

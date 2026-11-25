@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { importWeeklyGrid } from '../shared/weeklyGrid'
 import { addDays, dayInfo, typeKey, weekdayOf, WEEKDAYS, type ClassChange, type ClassTemplate, type RotationConfig, type SkipRule } from '../shared/rotation'
-import { api, type AppState, type LogEntry, type Option, type ImportPlan, type Plan, type PreviewSlot, type PushResult } from './api'
+import { api, type AppState, type LogEntry, type Option, type ImportPlan, type Plan, type PreviewSlot, type PushMode, type PushResult, type SyncPlanView } from './api'
 
-type Tab = 'calendar' | 'settings' | 'mariana' | 'import' | 'activity'
+type Tab = 'calendar' | 'weekly' | 'genre' | 'mariana' | 'import' | 'activity'
 const COLORS = ['#e4572e', '#2e86ab', '#3bb273', '#f2a541', '#8e6c8a', '#4f5d75']
 const genreColor = (cfg: RotationConfig, g: string) => COLORS[Math.max(0, cfg.genres.indexOf(g)) % COLORS.length]
 const fmtTime = (t: string) => { const [h, m] = t.split(':').map(Number); return `${((h + 11) % 12) + 1}:${String(m).padStart(2, '0')} ${h < 12 ? 'AM' : 'PM'}` }
@@ -23,13 +23,14 @@ export default function App() {
         <span className={`conn ${state.connection.mode}`} title={state.connection.label}>{state.connection.mode === 'live' ? `Mariana Tek: ${state.connection.label}` : 'Demo mode, not connected to Mariana Tek'}</span>
       </header>
       <nav>
-        {([['calendar', 'Calendar'], ['settings', 'Weekly schedule & rotation'], ['mariana', 'Mariana Tek'], ['import', 'Import schedule'], ['activity', 'Activity']] as const).map(([id, label]) => (
+        {([['calendar', 'Calendar'], ['weekly', 'Weekly classes'], ['genre', 'Genre rotation'], ['mariana', 'Mariana Tek setup'], ['import', 'Import schedule'], ['activity', 'Activity']] as const).map(([id, label]) => (
           <button key={id} className={tab === id ? 'on' : ''} onClick={() => setTab(id)}>{label}</button>
         ))}
       </nav>
       <main>
         {tab === 'calendar' && <CalendarView state={state} onChanged={reload} goMapping={() => setTab('mariana')} />}
-        {tab === 'settings' && <Settings state={state} onSaved={reload} />}
+        {tab === 'weekly' && <Settings key="weekly" part="weekly" state={state} onSaved={reload} goMapping={() => setTab('mariana')} />}
+        {tab === 'genre' && <Settings key="genre" part="genre" state={state} onSaved={reload} goMapping={() => setTab('mariana')} />}
         {tab === 'mariana' && <Mariana state={state} onChanged={reload} />}
         {tab === 'import' && <ImportCsv state={state} onChanged={reload} goMapping={() => setTab('mariana')} />}
         {tab === 'activity' && <Activity />}
@@ -46,14 +47,14 @@ function PushBar({ state, version, goMapping, onPushed }: { state: AppState; ver
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState('')
   const [pushedAt, setPushedAt] = useState(-1)
-  useEffect(() => { api.plan(from, to).then(setPlan).catch(() => setPlan(null)); if (version > pushedAt + 1) setMsg('') }, [from, to, version]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { api.plan(from, to, 'weekly').then(setPlan).catch(() => setPlan(null)); if (version > pushedAt + 1) setMsg('') }, [from, to, version]) // eslint-disable-line react-hooks/exhaustive-deps
   if (!plan) return null
   const n = plan.create.length + plan.update.length + plan.remove.length
   const notReady = !state.layoutId || plan.missingTypes.length > 0
   const push = async () => {
     if (!confirm(`Push ${n} change(s) for ${fmtDate(from)} – ${fmtDate(to)} to ${state.connection.mode === 'live' ? 'Mariana Tek' : 'the demo studio'}?`)) return
     setBusy(true)
-    try { const r = await api.apply(from, to); setPushedAt(version); setMsg(`Pushed: ${r.created} created, ${r.updated} changed, ${r.removed} removed${r.flagged.length ? `, ${r.flagged.length} need staff attention (booked)` : ''}.`); onPushed() } catch (e) { setMsg((e as Error).message) } finally { setBusy(false) }
+    try { const r = await api.apply(from, to, 'weekly'); setPushedAt(version); setMsg(`Pushed: ${r.created} created, ${r.updated} changed, ${r.removed} removed${r.flagged.length ? `, ${r.flagged.length} need staff attention (booked)` : ''}.`); onPushed() } catch (e) { setMsg((e as Error).message) } finally { setBusy(false) }
   }
   return (
     <section className={`card pushbar ${n ? 'pending' : ''}`}>
@@ -103,7 +104,7 @@ function DayEditor2({ date, state, slots, onSaved }: { date: string; state: AppS
               <select aria-label={`${s.time} level`} value={s.level} onChange={(e) => setClass(s.time, Number(e.target.value), s.genre)}>{Array.from({ length: cfg.levels }, (_, l) => <option key={l} value={l + 1}>Level {l + 1}</option>)}</select>
               <button className="ghost" onClick={() => cancel(s.time)} aria-label={`Cancel ${s.time}`}>Cancel</button>
             </span>}
-            <em className={s.mtId ? 'ok' : ''}>{s.changed ? 'Changed for this date · ' : ''}{s.mtId ? 'In Mariana Tek' : 'Not pushed'}</em>
+            <em className={s.mtId ? 'ok' : ''}>{s.changed ? 'Changed for this date · ' : ''}{s.mtId ? (s.mtGenre ? 'In Mariana Tek' : 'In Mariana Tek · genre not pushed yet') : 'Not pushed'}</em>
           </li>
         ))}
         {cancelled.map((c, i) => (
@@ -239,25 +240,27 @@ function GridImport({ levels, onApply }: { levels: number; onApply: (weekly: (Cl
   )
 }
 
-function Settings({ state, onSaved }: { state: AppState; onSaved: () => void }) {
+function Settings({ part, state, onSaved, goMapping }: { part: 'weekly' | 'genre'; state: AppState; onSaved: () => void; goMapping: () => void }) {
   const [cfg, setCfg] = useState<RotationConfig>(state.config)
   const [skips, setSkips] = useState<SkipRule[]>(state.skips)
-  const [skip, setSkip] = useState<SkipRule>({ date: '', time: '', note: '' })
   const [msg, setMsg] = useState('')
   const set = (p: Partial<RotationConfig>) => { setCfg({ ...cfg, ...p }); setMsg('') }
   const move = (i: number, d: number) => { const g = [...cfg.genres]; [g[i], g[i + d]] = [g[i + d], g[i]]; set({ genres: g }) }
   const setDay = (day: number, classes: ClassTemplate[]) => set({ weekly: cfg.weekly.map((c, i) => (i === day ? classes : c)) })
   const copyDay = (day: number, target: string) => set({ weekly: cfg.weekly.map((c, i) => (COPY_TARGETS[target].includes(i) ? cfg.weekly[day].map((x) => ({ ...x })) : c)) })
   const save = async () => {
-    try { await api.saveConfig(cfg); await api.saveSkips(skips); setMsg('Saved. Use the Mariana Tek tab to push the changes.'); onSaved() } catch (e) { setMsg((e as Error).message) }
+    try { await api.saveConfig(cfg); await api.saveSkips(skips); setMsg('Saved.'); onSaved() } catch (e) { setMsg((e as Error).message) }
   }
   const allTimes = [...new Set(cfg.weekly.flat().map((c) => c.time))].sort()
+  const skipsCard = <SkipsCard cfg={cfg} skips={skips} setSkips={(s) => { setSkips(s); setMsg('') }} allTimes={allTimes} />
   const perWeek = cfg.weekly.reduce((n, d) => n + d.length, 0)
   const preview = Array.from({ length: 14 }, (_, i) => addDays(state.today, i))
-  return (
+  const dirty = JSON.stringify(cfg) !== JSON.stringify(state.config) || JSON.stringify(skips) !== JSON.stringify(state.skips)
+  const saveBar = <div className="actions"><button className="primary" onClick={save} disabled={!dirty}>Save settings</button>{msg ? <span className="msg">{msg}</span> : dirty ? <span className="msg">Unsaved changes</span> : null}</div>
+  if (part === 'weekly') return (
     <div className="stack">
       <section className="card form">
-        <h2>1. Weekly schedule</h2>
+        <h2>1. Weekly classes: times and levels</h2>
         <p className="muted">Set each day's class times and levels. Every Monday gets Monday's schedule, and so on. {perWeek} classes a week.</p>
         <GridImport levels={cfg.levels} onApply={(w) => set({ weekly: cfg.weekly.map((c, i) => w[i] ?? c) })} />
         {DAY_ORDER.map((d) => <DayEditor key={d} day={d} classes={cfg.weekly[d]} levels={cfg.levels} onChange={(c) => setDay(d, c)} onCopy={(t) => copyDay(d, t)} />)}
@@ -266,8 +269,25 @@ function Settings({ state, onSaved }: { state: AppState; onSaved: () => void }) 
           <label>Class length (minutes)<input type="number" min={5} max={240} value={cfg.durationMin} onChange={(e) => set({ durationMin: Number(e.target.value) })} /></label>
         </div>
       </section>
+      <section className="card">
+        <h2>The week at a glance</h2>
+        <div className="tablewrap"><table className="preview week">
+          <thead><tr><th>Time</th>{DAY_ORDER.map((d) => <th key={d}>{WEEKDAYS[d]}</th>)}</tr></thead>
+          <tbody>{allTimes.map((t) => <tr key={t}><td>{fmtTime(t)}</td>{DAY_ORDER.map((d) => { const c = cfg.weekly[d].find((x) => x.time === t); return <td key={d} className={c ? `lvl lvl${c.level}` : ''}>{c ? `Level ${c.level}` : '–'}</td> })}</tr>)}</tbody>
+          <tfoot><tr><td>Classes</td>{DAY_ORDER.map((d) => <td key={d}>{cfg.weekly[d].length}</td>)}</tr></tfoot>
+        </table></div>
+      </section>
+      {skipsCard}
+      {saveBar}
+      <PushStep state={state} mode="weekly" dirty={dirty} goMapping={goMapping} onPushed={onSaved} defaultWeeks={12} weekOptions={[4, 8, 12, 26, 52]}
+        title="2. Push weekly classes to Mariana Tek"
+        intro="Creates every class at its weekly time and level, without a genre (class types Level 1–3). Re-pushing only adds, moves or removes what changed. Classes that already have their genre keep it." />
+    </div>
+  )
+  return (
+    <div className="stack">
       <section className="card form">
-        <h2>2. Genre rotation</h2>
+        <h2>1. Genre rotation</h2>
         <p className="muted">The genre moves to the next one every day, including weekends and holidays. It applies to every class that day.</p>
         <label>Day 1 date<input type="date" value={cfg.startDate} onChange={(e) => set({ startDate: e.target.value })} /></label>
         <p className="muted">This date is {cfg.genres[0]}.</p>
@@ -282,6 +302,7 @@ function Settings({ state, onSaved }: { state: AppState; onSaved: () => void }) 
         </div>
         <label>Studio time zone<input value={cfg.timeZone} onChange={(e) => set({ timeZone: e.target.value })} /></label>
       </section>
+      {saveBar}
       <section className="card">
         <h2>Preview: next 2 weeks</h2>
         <div className="tablewrap"><table className="preview">
@@ -291,6 +312,16 @@ function Settings({ state, onSaved }: { state: AppState; onSaved: () => void }) 
               {allTimes.map((t) => { const c = day.find((x) => x.time === t); return <td key={t}>{c ? `L${c.level}` : ''}</td> })}</tr>) })}</tbody>
         </table></div>
       </section>
+      <PushStep state={state} mode="genre" dirty={dirty} goMapping={goMapping} onPushed={onSaved} defaultWeeks={3} weekOptions={[1, 2, 3, 4, 6, 8]}
+        title="2. Push the genre rotation to Mariana Tek"
+        intro="Sets each class's genre for the chosen weeks (Level 2 becomes Strength 2, Endurance 2 and so on). It only changes classes the weekly push created, and never adds or removes classes." />
+    </div>
+  )
+}
+
+function SkipsCard({ cfg, skips, setSkips, allTimes }: { cfg: RotationConfig; skips: SkipRule[]; setSkips: (s: SkipRule[]) => void; allTimes: string[] }) {
+  const [skip, setSkip] = useState<SkipRule>({ date: '', time: '', note: '' })
+  return (
       <section className="card form">
         <h2>Skipped classes</h2>
         <p className="muted">Optional. Skipping a class removes it but does not shift the rotation.</p>
@@ -302,8 +333,62 @@ function Settings({ state, onSaved }: { state: AppState; onSaved: () => void }) 
         </div>
         <ul className="list">{skips.map((s, i) => <li key={i}>{fmtDate(s.date)} · {s.time ? fmtTime(s.time) : 'all classes'}{s.note ? ` · ${s.note}` : ''}<button onClick={() => setSkips(skips.filter((_, j) => j !== i))}>Remove</button></li>)}</ul>
       </section>
-      <div className="actions"><button className="primary" onClick={save}>Save settings</button>{msg && <span className="msg">{msg}</span>}</div>
-    </div>
+  )
+}
+
+const label = (genre: string, level: number) => (genre ? `${genre} ${level}` : `Level ${level}`)
+
+function PushStep({ state, mode, title, intro, defaultWeeks, weekOptions, dirty, goMapping, onPushed }: {
+  state: AppState; mode: PushMode; title: string; intro: string; defaultWeeks: number; weekOptions: number[]; dirty: boolean; goMapping: () => void; onPushed: () => void
+}) {
+  const [weeks, setWeeks] = useState(defaultWeeks)
+  const [plan, setPlan] = useState<SyncPlanView | null>(null)
+  const [result, setResult] = useState<PushResult | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+  const from = state.today, to = addDays(state.today, weeks * 7 - 1)
+  useEffect(() => { api.plan(from, to, mode).then(setPlan).catch((e) => setErr(e.message)) }, [from, to, mode, state])
+  const n = plan ? plan.create.length + plan.update.length + plan.remove.length : 0
+  const notReady = !state.layoutId || !!plan?.missingTypes.length
+  const push = async () => {
+    if (!confirm(`Push ${n} change(s) for ${fmtDate(from)} – ${fmtDate(to)} to ${state.connection.mode === 'live' ? state.connection.label : 'the demo studio'}?`)) return
+    setBusy(true); setErr('')
+    try { setResult(await api.apply(from, to, mode)); onPushed() } catch (e) { setErr((e as Error).message) } finally { setBusy(false) }
+  }
+  return (
+    <section className="card form pushstep">
+      <h2>{title}</h2>
+      <p className="muted">{intro}</p>
+      <div className="row wrap">
+        <label className="inline">Push ahead<select value={weeks} onChange={(e) => { setWeeks(Number(e.target.value)); setResult(null) }}>{weekOptions.map((w) => <option key={w} value={w}>{w} week{w > 1 ? 's' : ''}</option>)}</select></label>
+        <span className="muted">{fmtDate(from)} – {fmtDate(to)}</span>
+        {mode === 'genre' && <a className="btn ghost" href={api.csvUrl(from, to)}>Download CSV</a>}
+      </div>
+      {plan && (
+        <div className="plan">
+          {mode === 'genre' && plan.waiting > 0 && <p className="warn">{plan.waiting} class{plan.waiting === 1 ? '' : 'es'} in these weeks {plan.waiting === 1 ? "isn't" : "aren't"} in Mariana Tek yet, so {plan.waiting === 1 ? 'it' : 'they'} can't get a genre. Push the weekly classes first (Weekly classes tab).</p>}
+          {plan.missingTypes.length > 0 && <p className="warn">Class types not matched yet: {plan.missingTypes.join(', ')}</p>}
+          <div className="stats">
+            {mode !== 'genre' && <span><b>{plan.create.length}</b> to create</span>}
+            <span><b>{plan.update.length}</b> {mode === 'genre' ? 'to get their genre' : 'to change'}</span>
+            {mode !== 'genre' && <span><b>{plan.remove.length}</b> to remove</span>}
+            <span><b>{plan.unchanged}</b> already correct</span>
+          </div>
+          {n > 0 && <details><summary>See the changes</summary><ul className="list">
+            {plan.create.slice(0, 300).map((s) => <li key={s.key}>+ {fmtDate(s.date)} {fmtTime(s.time)} · {label(s.genre, s.level)}</li>)}
+            {plan.update.slice(0, 300).map((u) => <li key={u.slot.key}>~ {fmtDate(u.slot.date)} {fmtTime(u.slot.time)} · {u.from} → {label(u.slot.genre, u.slot.level)}</li>)}
+            {plan.remove.map((r) => <li key={r.key}>− {fmtDate(r.key.slice(0, 10))} {fmtTime(r.key.slice(11))} · {label(r.genre, r.level)}</li>)}
+          </ul></details>}
+          <div className="row wrap">
+            {notReady ? <button className="ghost" onClick={goMapping}>Match class types &amp; room first</button>
+              : <button className="primary" disabled={busy || dirty || n === 0} onClick={push}>{n === 0 ? 'Mariana Tek is up to date' : `Push ${n} change${n === 1 ? '' : 's'} to ${state.connection.mode === 'live' ? 'Mariana Tek' : 'demo studio'}`}</button>}
+            {dirty && <span className="muted">Save settings first.</span>}
+          </div>
+        </div>
+      )}
+      {result && <PushResultView result={result} />}
+      {err && <p className="warn">{err}</p>}
+    </section>
   )
 }
 
@@ -312,12 +397,9 @@ function Mariana({ state, onChanged }: { state: AppState; onChanged: () => void 
   const [opts, setOpts] = useState<{ types: Option[]; layouts: Option[] } | null>(null)
   const [typeMap, setTypeMap] = useState(state.typeMap)
   const [layoutId, setLayoutId] = useState(state.layoutId)
-  const [weeks, setWeeks] = useState(4)
-  const [plan, setPlan] = useState<Plan | null>(null)
-  const [result, setResult] = useState<PushResult | null>(null)
+  const [saved, setSaved] = useState(false)
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
-  const from = state.today, to = addDays(state.today, weeks * 7 - 1)
   useEffect(() => { api.options().then(setOpts).catch((e) => setErr(e.message)) }, [])
   const autoMatch = () => {
     if (!opts) return
@@ -326,16 +408,14 @@ function Mariana({ state, onChanged }: { state: AppState; onChanged: () => void 
       const hit = opts.types.find((t) => { const n = t.name.toLowerCase(); return n.includes(g.toLowerCase()) && new RegExp(`(^|\\D)${l}(\\D|$)`).test(n) })
       if (hit) m[typeKey(g, l)] = hit.id
     }
+    for (let l = 1; l <= cfg.levels; l++) {
+      const hit = opts.types.find((t) => { const n = t.name.toLowerCase(); return !cfg.genres.some((g) => n.includes(g.toLowerCase())) && n.includes('level') && new RegExp(`(^|\\D)${l}(\\D|$)`).test(n) })
+      if (hit) m[typeKey('', l)] = hit.id
+    }
     setTypeMap(m)
   }
   const run = async (fn: () => Promise<void>) => { setBusy(true); setErr(''); try { await fn() } catch (e) { setErr((e as Error).message) } finally { setBusy(false) } }
-  const saveMapping = () => run(async () => { await api.saveMapping(typeMap, layoutId); onChanged(); setPlan(await api.plan(from, to)) })
-  const push = () => run(async () => {
-    if (!plan) return
-    const n = plan.create.length + plan.update.length + plan.remove.length
-    if (!confirm(`Apply ${n} change(s) to ${state.connection.mode === 'live' ? state.connection.label : 'the demo studio'}?`)) return
-    setResult(await api.apply(from, to)); setPlan(await api.plan(from, to)); onChanged()
-  })
+  const saveMapping = () => run(async () => { await api.saveMapping(typeMap, layoutId); setSaved(true); onChanged() })
   return (
     <div className="stack">
       {state.connection.mode === 'demo' && (
@@ -345,46 +425,16 @@ function Mariana({ state, onChanged }: { state: AppState; onChanged: () => void 
         </section>
       )}
       <section className="card form">
-        <h2>1. Match class types</h2>
-        <p className="muted">Pick the Mariana Tek class type for each genre and level. Create them in Mariana Tek first (each set to {cfg.durationMin} minutes); class length comes from the class type.</p>
+        <h2>Match class types and room</h2>
+        <p className="muted">Pick the Mariana Tek class type for each level (used by the weekly push, before a class has its genre) and for each genre and level (used by the genre push). Create them in Mariana Tek first, each set to {cfg.durationMin} minutes; class length comes from the class type.</p>
         <button className="ghost" onClick={autoMatch} disabled={!opts}>Auto-match by name</button>
         <table className="map"><thead><tr><th>Genre</th>{Array.from({ length: cfg.levels }, (_, l) => <th key={l}>Level {l + 1}</th>)}</tr></thead>
-          <tbody>{cfg.genres.map((g) => <tr key={g}><th>{g}</th>{Array.from({ length: cfg.levels }, (_, l) => (
-            <td key={l}><select aria-label={`${g} level ${l + 1}`} value={typeMap[typeKey(g, l + 1)] ?? ''} onChange={(e) => setTypeMap({ ...typeMap, [typeKey(g, l + 1)]: e.target.value })}>
+          <tbody>{['', ...cfg.genres].map((g) => <tr key={g}><th>{g || 'No genre yet'}</th>{Array.from({ length: cfg.levels }, (_, l) => (
+            <td key={l}><select aria-label={`${g || 'No genre'} level ${l + 1}`} value={typeMap[typeKey(g, l + 1)] ?? ''} onChange={(e) => setTypeMap({ ...typeMap, [typeKey(g, l + 1)]: e.target.value })}>
               <option value="">Choose…</option>{opts?.types.map((t) => <option key={t.id} value={t.id}>{t.name}{t.detail ? ` (${t.detail})` : ''}</option>)}</select></td>))}</tr>)}</tbody></table>
         <label>Room layout<select value={layoutId} onChange={(e) => setLayoutId(e.target.value)}><option value="">Choose…</option>{opts?.layouts.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}</select></label>
       </section>
-      <section className="card form">
-        <h2>2. Preview and push</h2>
-        <div className="row wrap">
-          <label className="inline">Schedule ahead<select value={weeks} onChange={(e) => { setWeeks(Number(e.target.value)); setPlan(null) }}>{[1, 2, 4, 8, 12].map((w) => <option key={w} value={w}>{w} week{w > 1 ? 's' : ''}</option>)}</select></label>
-          <span className="muted">{fmtDate(from)} – {fmtDate(to)}</span>
-          <button onClick={saveMapping} disabled={busy}>Save & preview changes</button>
-          <a className="btn ghost" href={api.csvUrl(from, to)}>Download CSV</a>
-        </div>
-        {plan && (
-          <div className="plan">
-            {plan.missingTypes.length > 0 && <p className="warn">Not matched yet: {plan.missingTypes.join(', ')}</p>}
-            <div className="stats"><span><b>{plan.create.length}</b> to create</span><span><b>{plan.update.length}</b> to change</span><span><b>{plan.remove.length}</b> to remove</span><span><b>{plan.unchanged}</b> already correct</span></div>
-            <details><summary>See the changes</summary><ul className="list">
-              {plan.create.map((s) => <li key={s.key}>+ {fmtDate(s.date)} {fmtTime(s.time)} · {s.genre} {s.level}</li>)}
-              {plan.update.map((u) => <li key={u.slot.key}>~ {fmtDate(u.slot.date)} {fmtTime(u.slot.time)} · {u.from} → {u.slot.genre} L{u.slot.level}</li>)}
-              {plan.remove.map((r) => <li key={r.key}>− {fmtDate(r.key.slice(0, 10))} {fmtTime(r.key.slice(11))} · {r.genre} L{r.level}</li>)}
-            </ul></details>
-            <p className="muted">Classes that already have bookings are never changed or removed automatically; they are listed for staff instead. Past classes are never touched.</p>
-            <button className="primary" disabled={busy || plan.missingTypes.length > 0 || !layoutId || plan.create.length + plan.update.length + plan.remove.length === 0} onClick={push}>
-              {state.connection.mode === 'live' ? 'Push to Mariana Tek' : 'Push to demo studio'}</button>
-          </div>
-        )}
-        {result && (
-          <div className="result">
-            <p><b>Done:</b> {result.created} created, {result.updated} changed, {result.removed} removed.</p>
-            {result.flagged.length > 0 && <><p className="warn">Needs staff attention ({result.flagged.length}):</p><ul className="list">{result.flagged.map((f) => <li key={f.key}>{fmtDate(f.key.slice(0, 10))} {fmtTime(f.key.slice(11))}: {f.reason}</li>)}</ul></>}
-            {result.errors.length > 0 && <><p className="warn">Errors ({result.errors.length}):</p><ul className="list">{result.errors.map((e, i) => <li key={i}>{e}</li>)}</ul></>}
-          </div>
-        )}
-        {err && <p className="warn">{err}</p>}
-      </section>
+      <div className="actions"><button className="primary" onClick={saveMapping} disabled={busy}>Save</button>{saved && <span className="msg">Saved. Push from the Weekly classes and Genre rotation tabs.</span>}{err && <span className="warn">{err}</span>}</div>
     </div>
   )
 }

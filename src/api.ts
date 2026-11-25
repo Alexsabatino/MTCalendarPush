@@ -4,9 +4,11 @@ export interface AppState {
   config: RotationConfig; skips: SkipRule[]; changes: ClassChange[]; typeMap: Record<string, string>; layoutId: string; instructorIds: string[]
   pushedCount: number; today: string; connection: { mode: 'demo' | 'live'; label: string }
 }
-export type PreviewSlot = Slot & { end: string; mtId: string | null }
+export type PreviewSlot = Slot & { end: string; mtId: string | null; mtGenre: string | null }
+export type PushMode = 'all' | 'weekly' | 'genre'
 export interface Option { id: string; name: string; detail?: string }
 export interface Plan { create: Slot[]; update: { slot: Slot; mtId: string; from: string }[]; remove: { key: string; mtId: string; genre: string; level: number }[]; unchanged: number; missingTypes: string[] }
+export interface SyncPlanView extends Plan { waiting: number }
 export interface PushResult { created: number; updated: number; removed: number; flagged: { key: string; mtId: string; reason: string }[]; errors: string[] }
 export interface ImportPlan extends Plan { format?: 'rows' | 'grid'; needsWeekStart: boolean; genreFromRotation: number; rows: number; errors: { row: number; message: string }[]; from: string | null; to: string | null; past: number }
 export interface LogEntry { at: string; action: string; detail: string }
@@ -26,8 +28,8 @@ export const api = {
   preview: (from: string, to: string) => req<PreviewSlot[]>('GET', `/api/preview?from=${from}&to=${to}`),
   options: () => req<{ types: Option[]; layouts: Option[] }>('GET', '/api/mariana/options'),
   saveMapping: (typeMap: Record<string, string>, layoutId: string) => req('PUT', '/api/mariana/mapping', { typeMap, layoutId, instructorIds: [] }),
-  plan: (from: string, to: string) => req<Plan>('POST', '/api/sync/plan', { from, to }),
-  apply: (from: string, to: string) => req<PushResult>('POST', '/api/sync/apply', { from, to }),
+  plan: (from: string, to: string, mode: PushMode = 'all') => req<SyncPlanView>('POST', '/api/sync/plan', { from, to, mode }),
+  apply: (from: string, to: string, mode: PushMode = 'all') => req<PushResult>('POST', '/api/sync/apply', { from, to, mode }),
   importPlan: (csv: string, removeMissing: boolean, weekStart?: string) => req<ImportPlan>('POST', '/api/import/plan', { csv, removeMissing, weekStart: weekStart || undefined }),
   importApply: (csv: string, removeMissing: boolean, weekStart?: string) => req<PushResult>('POST', '/api/import/apply', { csv, removeMissing, weekStart: weekStart || undefined }),
   log: () => req<LogEntry[]>('GET', '/api/log'),
