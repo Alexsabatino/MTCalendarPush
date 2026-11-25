@@ -83,3 +83,26 @@ describe('LiveMariana', () => {
     expect(sent.data.relationships.class_session_type.data).toEqual({ type: 'class_session_types', id: '7' })
   })
 })
+
+describe('CSV import API', () => {
+  const csv = 'Date,Start,Genre,Level\n2026-12-20,07:00,Strength,3\n2026-12-20,08:00,Endurance,1\n2026-11-29,07:00,Strength,1\n'
+  it('previews and pushes a whole file, skipping past rows and without duplicates', async () => {
+    const plan = await call('POST', '/api/import/plan', { csv })
+    expect(plan.body).toMatchObject({ rows: 3, past: 1, errors: [] })
+    expect(plan.body.create).toHaveLength(2)
+    const r = await call('POST', '/api/import/apply', { csv })
+    expect(r.body).toMatchObject({ created: 2, updated: 0, removed: 0 })
+    expect((await call('POST', '/api/import/apply', { csv })).body.created).toBe(0)
+  })
+  it('changes types and only removes missing classes when asked', async () => {
+    const next = 'Date,Start,Genre,Level\n2026-12-20,07:00,Longevity,2\n'
+    expect((await call('POST', '/api/import/plan', { csv: next })).body).toMatchObject({ update: [expect.anything()], remove: [] })
+    const r = await call('POST', '/api/import/apply', { csv: next, removeMissing: true })
+    expect(r.body).toMatchObject({ updated: 1, removed: 1 })
+  })
+  it('refuses to push a file with row errors', async () => {
+    const r = await call('POST', '/api/import/apply', { csv: 'Date,Start,Genre,Level\nnope,07:00,Strength,1\n' })
+    expect(r.status).toBe(400)
+    expect(r.body.error).toContain('row error')
+  })
+})

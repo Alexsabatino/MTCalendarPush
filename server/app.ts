@@ -2,6 +2,7 @@ import express from 'express'
 import { z } from 'zod'
 import { addDays, endTime, generateSlots, nowTimeIn, todayIn, typeKey, type Slot } from '../shared/rotation'
 import { planSync, type SyncPlan } from '../shared/sync'
+import { importSchedule } from '../shared/csvImport'
 import { DemoMariana, LiveMariana, MarianaError, type MarianaClient } from './mariana'
 import { Store } from './store'
 
@@ -21,7 +22,7 @@ export interface AppOptions { store: Store; client?: MarianaClient; now?: () => 
 
 export function createApp({ store, client, now = () => new Date() }: AppOptions) {
   const app = express()
-  app.use(express.json())
+  app.use(express.json({ limit: '3mb' }))
   const demo = new DemoMariana(store.data.demo, () => store.save())
   const mt = (): MarianaClient => {
     if (client) return client
@@ -36,7 +37,7 @@ export function createApp({ store, client, now = () => new Date() }: AppOptions)
   const slots = (from: string, to: string) => generateSlots(from, to, store.data.config, store.data.skips)
   const plan = (from: string, to: string): SyncPlan =>
     planSync(slots(from, to), store.data.pushed, (g, l) => store.data.typeMap[typeKey(g, l)], from, to, nowKey())
-  const note = (s: Slot) => `${s.genre} · Level ${s.level} (rotation day ${s.cycleDay})`
+  const note = (s: Slot) => `${s.genre} · Level ${s.level}${s.cycleDay ? ` (rotation day ${s.cycleDay})` : ''}`
 
   app.get('/api/state', (_req, res) => {
     const c = mt()
@@ -85,11 +86,7 @@ export function createApp({ store, client, now = () => new Date() }: AppOptions)
     res.json({ create: p.create, update: p.update.map((u) => ({ slot: u.slot, mtId: u.pushed.mtId, from: `${u.pushed.genre} L${u.pushed.level}` })), remove: p.remove, unchanged: p.unchanged, missingTypes: p.missingTypes })
   })
 
-  app.post('/api/sync/apply', async (req, res) => {
-    const { from, to } = rangeSchema.parse(req.body)
-    if (!store.data.layoutId) return res.status(400).json({ error: 'Choose a room layout in the Mariana Tek tab first.' })
-    const p = plan(from, to)
-    if (p.missingTypes.length) return res.status(400).json({ error: `Map a Mariana Tek class type for: ${p.missingTypes.join(', ')}` })
+  const applyPlan = async (p: SyncPlan, label: string) => {
     const c = mt()
     const result = { created: 0, updated: 0, removed: 0, flagged: [] as { key: string; mtId: string; reason: string }[], errors: [] as string[] }
     for (const slot of p.create) {
@@ -114,15 +111,59 @@ export function createApp({ store, client, now = () => new Date() }: AppOptions)
     for (const r of p.remove) {
       try {
         const booked = await c.reservationCount(r.mtId)
-        if (booked > 0) { result.flagged.push({ key: r.key, mtId: r.mtId, reason: `${booked} booking(s); no longer in the rotation. Cancel it in Mariana Tek if needed.` }); continue }
+        if (booked > 0) { result.flagged.push({ key: r.key, mtId: r.mtId, reason: `${booked} booking(s); not in the new schedule. Cancel it in Mariana Tek if needed.` }); continue }
         await c.deleteClass(r.mtId)
         store.data.pushed = store.data.pushed.filter((x) => x !== r)
         store.save()
         result.removed++
       } catch (e) { result.errors.push(`${r.key}: ${(e as Error).message}`) }
     }
-    store.log('push', `${from} to ${to}: ${result.created} created, ${result.updated} updated, ${result.removed} removed, ${result.flagged.length} flagged, ${result.errors.length} errors`)
-    res.json(result)
+    store.log('push', `${label}: ${result.created} created, ${result.updated} updated, ${result.removed} removed, ${result.flagged.length} flagged, ${result.errors.length} errors`)
+    return result
+  }
+  const readyError = (p: SyncPlan) =>
+    !store.data.layoutId ? 'Choose a room layout in the Mariana Tek tab first.'
+      : p.missingTypes.length ? `Map a Mariana Tek class type for: ${p.missingTypes.join(', ')}` : null
+
+  app.post('/api/sync/apply', async (req, res) => {
+    const { from, to } = rangeSchema.parse(req.body)
+    const p = plan(from, to)
+    const err = readyError(p)
+    if (err) return res.status(400).json({ error: err })
+    res.json(await applyPlan(p, `Rotation ${from} to ${to}`))
+  })
+
+  const importBody = z.object({ csv: z.string().max(2_000_000), removeMissing: z.boolean().default(false) })
+  const importPlan = (csv: string, removeMissing: boolean) => {
+    const cfg = store.data.config
+    const parsed = importSchedule(csv, cfg.genres, cfg.levels)
+    const nk = nowKey()
+    const past = parsed.slots.filter((s) => s.key <= nk).length
+    const p = parsed.from && parsed.to
+      ? planSync(parsed.slots, store.data.pushed, (g, l) => store.data.typeMap[typeKey(g, l)], parsed.from, parsed.to, nk)
+      : { create: [], update: [], remove: [], unchanged: 0, missingTypes: [] } as SyncPlan
+    if (!removeMissing) p.remove = []
+    return { parsed, past, p }
+  }
+
+  app.post('/api/import/plan', (req, res) => {
+    const { csv, removeMissing } = importBody.parse(req.body)
+    const { parsed, past, p } = importPlan(csv, removeMissing)
+    res.json({
+      rows: parsed.slots.length, errors: parsed.errors, from: parsed.from, to: parsed.to, past,
+      create: p.create, update: p.update.map((u) => ({ slot: u.slot, mtId: u.pushed.mtId, from: `${u.pushed.genre} L${u.pushed.level}` })),
+      remove: p.remove, unchanged: p.unchanged, missingTypes: p.missingTypes,
+    })
+  })
+
+  app.post('/api/import/apply', async (req, res) => {
+    const { csv, removeMissing } = importBody.parse(req.body)
+    const { parsed, p } = importPlan(csv, removeMissing)
+    if (parsed.errors.length) return res.status(400).json({ error: `Fix the ${parsed.errors.length} row error(s) in the file first.` })
+    if (!parsed.slots.length) return res.status(400).json({ error: 'The file has no classes.' })
+    const err = readyError(p)
+    if (err) return res.status(400).json({ error: err })
+    res.json(await applyPlan(p, `CSV import ${parsed.from} to ${parsed.to}`))
   })
 
   app.get('/api/export.csv', (req, res) => {

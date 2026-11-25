@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { addDays, dayInfo, typeKey, type RotationConfig, type SkipRule } from '../shared/rotation'
-import { api, type AppState, type LogEntry, type Option, type Plan, type PreviewSlot, type PushResult } from './api'
+import { api, type AppState, type LogEntry, type Option, type ImportPlan, type Plan, type PreviewSlot, type PushResult } from './api'
 
-type Tab = 'calendar' | 'settings' | 'mariana' | 'activity'
+type Tab = 'calendar' | 'settings' | 'mariana' | 'import' | 'activity'
 const COLORS = ['#e4572e', '#2e86ab', '#3bb273', '#f2a541', '#8e6c8a', '#4f5d75']
 const genreColor = (cfg: RotationConfig, g: string) => COLORS[Math.max(0, cfg.genres.indexOf(g)) % COLORS.length]
 const fmtTime = (t: string) => { const [h, m] = t.split(':').map(Number); return `${((h + 11) % 12) + 1}:${String(m).padStart(2, '0')} ${h < 12 ? 'AM' : 'PM'}` }
@@ -22,7 +22,7 @@ export default function App() {
         <span className={`conn ${state.connection.mode}`} title={state.connection.label}>{state.connection.mode === 'live' ? `Mariana Tek: ${state.connection.label}` : 'Demo mode, not connected to Mariana Tek'}</span>
       </header>
       <nav>
-        {([['calendar', 'Calendar'], ['settings', 'Rotation settings'], ['mariana', 'Mariana Tek'], ['activity', 'Activity']] as const).map(([id, label]) => (
+        {([['calendar', 'Calendar'], ['settings', 'Rotation settings'], ['mariana', 'Mariana Tek'], ['import', 'Import CSV'], ['activity', 'Activity']] as const).map(([id, label]) => (
           <button key={id} className={tab === id ? 'on' : ''} onClick={() => setTab(id)}>{label}</button>
         ))}
       </nav>
@@ -30,6 +30,7 @@ export default function App() {
         {tab === 'calendar' && <CalendarView state={state} />}
         {tab === 'settings' && <Settings state={state} onSaved={reload} />}
         {tab === 'mariana' && <Mariana state={state} onChanged={reload} />}
+        {tab === 'import' && <ImportCsv state={state} onChanged={reload} goMapping={() => setTab('mariana')} />}
         {tab === 'activity' && <Activity />}
       </main>
     </div>
@@ -244,5 +245,79 @@ function Activity() {
     <section className="card"><h2>Activity</h2>
       <ul className="list">{log.map((l, i) => <li key={i}><span className="muted">{new Date(l.at).toLocaleString()}</span> · <b>{l.action}</b> · {l.detail}</li>)}{!log.length && <li className="muted">Nothing yet.</li>}</ul>
     </section>
+  )
+}
+
+function PushResultView({ result }: { result: PushResult }) {
+  return (
+    <div className="result">
+      <p><b>Done:</b> {result.created} created, {result.updated} changed, {result.removed} removed.</p>
+      {result.flagged.length > 0 && <><p className="warn">Needs staff attention ({result.flagged.length}):</p><ul className="list">{result.flagged.map((f) => <li key={f.key}>{fmtDate(f.key.slice(0, 10))} {fmtTime(f.key.slice(11))}: {f.reason}</li>)}</ul></>}
+      {result.errors.length > 0 && <><p className="warn">Errors ({result.errors.length}):</p><ul className="list">{result.errors.map((e, i) => <li key={i}>{e}</li>)}</ul></>}
+    </div>
+  )
+}
+
+function ImportCsv({ state, onChanged, goMapping }: { state: AppState; onChanged: () => void; goMapping: () => void }) {
+  const cfg = state.config
+  const [csv, setCsv] = useState('')
+  const [fileName, setFileName] = useState('')
+  const [removeMissing, setRemoveMissing] = useState(false)
+  const [plan, setPlan] = useState<ImportPlan | null>(null)
+  const [result, setResult] = useState<PushResult | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+  const run = async (fn: () => Promise<void>) => { setBusy(true); setErr(''); try { await fn() } catch (e) { setErr((e as Error).message) } finally { setBusy(false) } }
+  const check = (text: string, remove: boolean) => run(async () => { setResult(null); setPlan(await api.importPlan(text, remove)) })
+  const onFile = async (f: File | undefined) => {
+    if (!f) return
+    const text = await f.text()
+    setCsv(text); setFileName(f.name); check(text, removeMissing)
+  }
+  const changes = plan ? plan.create.length + plan.update.length + plan.remove.length : 0
+  const notReady = !state.layoutId || (plan?.missingTypes.length ?? 0) > 0
+  const push = () => run(async () => {
+    if (!confirm(`Push ${changes} change(s) from ${fileName || 'the file'} to ${state.connection.mode === 'live' ? state.connection.label : 'the demo studio'}?`)) return
+    setResult(await api.importApply(csv, removeMissing)); setPlan(await api.importPlan(csv, removeMissing)); onChanged()
+  })
+  const sample = `Date,Start,Genre,Level\n${cfg.startDate},06:00,${cfg.genres[0]},1\n${cfg.startDate},9:00 AM,${cfg.genres[0]},1\n`
+  return (
+    <div className="stack">
+      <section className="card form">
+        <h2>Import a schedule from CSV</h2>
+        <p className="muted">Upload a spreadsheet of classes and push them all to Mariana Tek at once. This ignores the rotation settings: the file is the schedule.</p>
+        <div className="field"><span>Columns</span>
+          <p className="muted"><b>Date</b> (2026-12-01 or 12/1/2026), <b>Start</b> (06:00 or 6:00 AM), and either <b>Genre</b> + <b>Level</b> or a <b>Class name</b> like "{cfg.genres[0]} 2". Genres: {cfg.genres.join(', ')}; levels 1–{cfg.levels}. Other columns are ignored, so a CSV downloaded from the Mariana Tek tab works as-is.</p>
+          <div className="row wrap">
+            <a className="btn ghost" href={`data:text/csv;charset=utf-8,${encodeURIComponent(sample)}`} download="schedule-template.csv">Download template</a>
+          </div>
+        </div>
+        <label>CSV file<input type="file" accept=".csv,text/csv" onChange={(e) => onFile(e.target.files?.[0])} /></label>
+        <label className="inline"><input type="checkbox" checked={removeMissing} onChange={(e) => { setRemoveMissing(e.target.checked); if (csv) check(csv, e.target.checked) }} />
+          Also remove classes this tool created, between the file's first and last date, that aren't in the file</label>
+        {plan && (
+          <div className="plan">
+            <p><b>{fileName}</b>: {plan.rows} class{plan.rows === 1 ? '' : 'es'}{plan.from ? `, ${fmtDate(plan.from)} – ${fmtDate(plan.to!)}` : ''}{plan.past ? `. ${plan.past} already in the past will be skipped` : ''}.</p>
+            {plan.errors.length > 0 && <>
+              <p className="warn">{plan.errors.length} row{plan.errors.length === 1 ? '' : 's'} need fixing before you can push:</p>
+              <ul className="list errors">{plan.errors.slice(0, 50).map((e) => <li key={e.row}>{e.row ? `Row ${e.row}: ` : ''}{e.message}</li>)}{plan.errors.length > 50 && <li className="muted">…and {plan.errors.length - 50} more</li>}</ul>
+            </>}
+            {plan.missingTypes.length > 0 && <p className="warn">Not matched to a Mariana Tek class type yet: {plan.missingTypes.join(', ')}. <button className="ghost" onClick={goMapping}>Match class types</button></p>}
+            {!state.layoutId && <p className="warn">No room layout chosen yet. <button className="ghost" onClick={goMapping}>Choose one</button></p>}
+            <div className="stats"><span><b>{plan.create.length}</b> to create</span><span><b>{plan.update.length}</b> to change</span><span><b>{plan.remove.length}</b> to remove</span><span><b>{plan.unchanged}</b> already correct</span></div>
+            <details><summary>See the changes</summary><ul className="list">
+              {plan.create.map((s) => <li key={s.key}>+ {fmtDate(s.date)} {fmtTime(s.time)} · {s.genre} {s.level}</li>)}
+              {plan.update.map((u) => <li key={u.slot.key}>~ {fmtDate(u.slot.date)} {fmtTime(u.slot.time)} · {u.from} → {u.slot.genre} L{u.slot.level}</li>)}
+              {plan.remove.map((r) => <li key={r.key}>− {fmtDate(r.key.slice(0, 10))} {fmtTime(r.key.slice(11))} · {r.genre} L{r.level}</li>)}
+            </ul></details>
+            <p className="muted">Classes with bookings are never changed or removed automatically, and past classes are never touched. Pushing the same file again makes no duplicates.</p>
+            <button className="primary" disabled={busy || plan.errors.length > 0 || notReady || changes === 0} onClick={push}>
+              {state.connection.mode === 'live' ? 'Push whole schedule to Mariana Tek' : 'Push whole schedule to demo studio'}</button>
+          </div>
+        )}
+        {result && <PushResultView result={result} />}
+        {err && <p className="warn">{err}</p>}
+      </section>
+    </div>
   )
 }

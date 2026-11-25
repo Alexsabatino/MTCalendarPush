@@ -26,6 +26,20 @@ Open the `Local:` link it prints. Without Mariana Tek credentials it runs in **d
 1. **Rotation settings:** Day 1 date, genre order, number of levels, daily class times, class length, time zone, and optional skipped classes (skipping removes a class but does not shift the rotation).
 2. **Calendar:** month view and the next 9 days.
 3. **Mariana Tek:** match each genre/level to a Mariana Tek class type and pick the room layout, choose how far ahead to schedule, preview the changes, then push. A CSV export is also available.
+4. **Import CSV:** upload a whole schedule and push it in one go. The file replaces the rotation for the classes it lists.
+
+### CSV format
+
+| Date | Start | Genre | Level |
+|---|---|---|---|
+| 2026-12-01 | 06:00 | Strength | 1 |
+| 12/2/2026 | 5:30 PM | Endurance | 1 |
+
+- **Date:** `2026-12-01` or `12/1/2026`. **Start:** `06:00`, `17:30` or `5:30 PM`.
+- Instead of Genre + Level you can use one **Class name** column such as `Strength 2` or `Longevity L3`.
+- Other columns are ignored, so the app's own CSV export can be edited and re-imported.
+- The preview lists every bad row by row number (bad date/time, unknown genre, level out of range, duplicate date and time). Nothing is pushed until all rows are valid.
+- Rows in the past are skipped. Tick **Also remove…** to delete classes this tool created between the file's first and last date that aren't in the file.
 
 Pushing is safe to repeat. The tool remembers which Mariana Tek class it created for each date and time, so it never makes duplicates. When settings change it only touches future classes it created:
 - adds missing classes,
@@ -60,5 +74,6 @@ npm run build
 
 - `shared/rotation.ts` — rotation math (genre/level for any date, class slots).
 - `shared/sync.ts` — compares the plan with classes already pushed.
+- `shared/csvImport.ts` — reads and validates schedule CSVs.
 - `server/mariana.ts` — Mariana Tek API client and the demo studio.
 - `server/app.ts` — API routes. `src/` — React UI.
