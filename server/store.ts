@@ -1,6 +1,6 @@
 import fs from 'node:fs'
 import path from 'node:path'
-import { DEFAULT_CONFIG, type ClassChange, type RotationConfig, type SkipRule } from '../shared/rotation'
+import { DEFAULT_CONFIG, OLD_PLACEHOLDER_WEEKLY, type ClassChange, type RotationConfig, type SkipRule } from '../shared/rotation'
 import type { PushedClass } from '../shared/sync'
 import type { DemoClass } from './mariana'
 
@@ -38,6 +38,8 @@ export class Store {
       const saved = JSON.parse(fs.readFileSync(file, 'utf8'))
       const config = { ...DEFAULT_CONFIG, ...saved.config }
       delete config.times
+      const placeholder = (w: unknown) => JSON.stringify(w) === JSON.stringify(OLD_PLACEHOLDER_WEEKLY) || JSON.stringify(w) === JSON.stringify([OLD_PLACEHOLDER_WEEKLY[6], ...OLD_PLACEHOLDER_WEEKLY.slice(1, 6), OLD_PLACEHOLDER_WEEKLY[0]])
+      if (!config.weekly || placeholder(config.weekly)) config.weekly = structuredClone(DEFAULT_CONFIG.weekly)
       this.data = { ...fresh(), ...saved, config }
     }
   }
