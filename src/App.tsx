@@ -45,14 +45,15 @@ function PushBar({ state, version, goMapping, onPushed }: { state: AppState; ver
   const [plan, setPlan] = useState<Plan | null>(null)
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState('')
-  useEffect(() => { api.plan(from, to).then(setPlan).catch(() => setPlan(null)) }, [from, to, version])
+  const [pushedAt, setPushedAt] = useState(-1)
+  useEffect(() => { api.plan(from, to).then(setPlan).catch(() => setPlan(null)); if (version > pushedAt + 1) setMsg('') }, [from, to, version]) // eslint-disable-line react-hooks/exhaustive-deps
   if (!plan) return null
   const n = plan.create.length + plan.update.length + plan.remove.length
   const notReady = !state.layoutId || plan.missingTypes.length > 0
   const push = async () => {
     if (!confirm(`Push ${n} change(s) for ${fmtDate(from)} – ${fmtDate(to)} to ${state.connection.mode === 'live' ? 'Mariana Tek' : 'the demo studio'}?`)) return
     setBusy(true)
-    try { const r = await api.apply(from, to); setMsg(`Pushed: ${r.created} created, ${r.updated} changed, ${r.removed} removed${r.flagged.length ? `, ${r.flagged.length} need staff attention (booked)` : ''}.`); onPushed() } catch (e) { setMsg((e as Error).message) } finally { setBusy(false) }
+    try { const r = await api.apply(from, to); setPushedAt(version); setMsg(`Pushed: ${r.created} created, ${r.updated} changed, ${r.removed} removed${r.flagged.length ? `, ${r.flagged.length} need staff attention (booked)` : ''}.`); onPushed() } catch (e) { setMsg((e as Error).message) } finally { setBusy(false) }
   }
   return (
     <section className={`card pushbar ${n ? 'pending' : ''}`}>
@@ -96,7 +97,7 @@ function DayEditor2({ date, state, slots, onSaved }: { date: string; state: AppS
       <ul className="classes edit">
         {slots.map((s) => (
           <li key={s.key}>
-            <span>{fmtTime(s.time)} – {fmtTime(s.end)}</span>
+            <span title={`${fmtTime(s.time)} – ${fmtTime(s.end)}`}>{fmtTime(s.time)}</span>
             {past ? <b>{s.genre} {s.level}</b> : <span className="row">
               <select aria-label={`${s.time} genre`} value={s.genre} onChange={(e) => setClass(s.time, s.level, e.target.value)}>{cfg.genres.map((g) => <option key={g}>{g}</option>)}</select>
               <select aria-label={`${s.time} level`} value={s.level} onChange={(e) => setClass(s.time, Number(e.target.value), s.genre)}>{Array.from({ length: cfg.levels }, (_, l) => <option key={l} value={l + 1}>Level {l + 1}</option>)}</select>
