@@ -1,6 +1,6 @@
 import fs from 'node:fs'
 import path from 'node:path'
-import { DEFAULT_CONFIG, type RotationConfig, type SkipRule } from '../shared/rotation'
+import { DEFAULT_CONFIG, type ClassChange, type RotationConfig, type SkipRule } from '../shared/rotation'
 import type { PushedClass } from '../shared/sync'
 import type { DemoClass } from './mariana'
 
@@ -9,6 +9,7 @@ export interface LogEntry { at: string; action: string; detail: string }
 export interface StoreData {
   config: RotationConfig
   skips: SkipRule[]
+  changes: ClassChange[]
   typeMap: Record<string, string>
   layoutId: string
   instructorIds: string[]
@@ -20,6 +21,7 @@ export interface StoreData {
 const fresh = (): StoreData => ({
   config: structuredClone(DEFAULT_CONFIG),
   skips: [],
+  changes: [],
   typeMap: {},
   layoutId: '',
   instructorIds: [],

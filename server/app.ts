@@ -35,7 +35,7 @@ export function createApp({ store, client, now = () => new Date() }: AppOptions)
     const tz = store.data.config.timeZone
     return `${todayIn(tz, now())}T${nowTimeIn(tz, now())}`
   }
-  const slots = (from: string, to: string) => generateSlots(from, to, store.data.config, store.data.skips)
+  const slots = (from: string, to: string) => generateSlots(from, to, store.data.config, store.data.skips, store.data.changes)
   const plan = (from: string, to: string): SyncPlan =>
     planSync(slots(from, to), store.data.pushed, (g, l) => store.data.typeMap[typeKey(g, l)], from, to, nowKey())
   const note = (s: Slot) => `${s.genre} · Level ${s.level}`
@@ -43,7 +43,7 @@ export function createApp({ store, client, now = () => new Date() }: AppOptions)
   app.get('/api/state', (_req, res) => {
     const c = mt()
     res.json({
-      config: store.data.config, skips: store.data.skips, typeMap: store.data.typeMap, layoutId: store.data.layoutId,
+      config: store.data.config, skips: store.data.skips, changes: store.data.changes, typeMap: store.data.typeMap, layoutId: store.data.layoutId,
       instructorIds: store.data.instructorIds, pushedCount: store.data.pushed.length, today: todayIn(store.data.config.timeZone, now()),
       connection: { mode: c.mode, label: c.label },
     })
@@ -60,6 +60,15 @@ export function createApp({ store, client, now = () => new Date() }: AppOptions)
     store.data.skips = z.array(z.object({ date, time: time.optional(), note: z.string().max(120).optional() })).max(1000).parse(req.body)
     store.log('skips', `${store.data.skips.length} skipped date(s)/class(es)`)
     res.json(store.data.skips)
+  })
+
+  app.put('/api/changes', (req, res) => {
+    const cfg = store.data.config
+    const changes = z.array(z.object({ date, time, level: z.number().int().min(1).max(cfg.levels), genre: z.enum(cfg.genres as [string, ...string[]]).optional() })).max(2000)
+      .refine((c) => new Set(c.map((x) => `${x.date}T${x.time}`)).size === c.length, 'Only one change per class').parse(req.body)
+    store.data.changes = changes
+    store.log('changes', `${changes.length} one-date class change(s)`)
+    res.json(changes)
   })
 
   app.get('/api/preview', (req, res) => {

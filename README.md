@@ -9,6 +9,8 @@ How the schedule is built:
 
 **Importing your weekly grid:** on the Weekly schedule tab, open **Import from a spreadsheet**. Use a sheet with times down the first column (e.g. `6:15 AM`) and day names across the top row, and `Level 1/2/3` somewhere in each cell. Emoji, percentages and other text are ignored; blank or `-` means no class. Upload it as CSV (Google Sheets: File → Download → CSV) or paste cells copied from the sheet. Days missing from the sheet keep their current schedule. Check the result, click **Save settings**, then push from the Mariana Tek tab.
 
+**Quick one-date changes:** on the Calendar tab, click a date to change a class's genre or level, cancel it, or add an extra class, for that date only (a dot marks changed dates). The bar at the top shows how many changes aren't in Mariana Tek yet; **Push changes** sends only those.
+
 Example: if Monday is 6:00 L1 and 9:00 L3, one Monday's classes might be Strength 1 and Strength 3, the next Monday's Endurance 1 and Endurance 3. Classes are 50 minutes.
 
 ## Run it (Windows PowerShell)

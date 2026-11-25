@@ -1,7 +1,7 @@
-import type { RotationConfig, SkipRule, Slot } from '../shared/rotation'
+import type { ClassChange, RotationConfig, SkipRule, Slot } from '../shared/rotation'
 
 export interface AppState {
-  config: RotationConfig; skips: SkipRule[]; typeMap: Record<string, string>; layoutId: string; instructorIds: string[]
+  config: RotationConfig; skips: SkipRule[]; changes: ClassChange[]; typeMap: Record<string, string>; layoutId: string; instructorIds: string[]
   pushedCount: number; today: string; connection: { mode: 'demo' | 'live'; label: string }
 }
 export type PreviewSlot = Slot & { end: string; mtId: string | null }
@@ -22,6 +22,7 @@ export const api = {
   state: () => req<AppState>('GET', '/api/state'),
   saveConfig: (c: RotationConfig) => req<RotationConfig>('PUT', '/api/config', c),
   saveSkips: (s: SkipRule[]) => req<SkipRule[]>('PUT', '/api/skips', s),
+  saveChanges: (c: ClassChange[]) => req<ClassChange[]>('PUT', '/api/changes', c),
   preview: (from: string, to: string) => req<PreviewSlot[]>('GET', `/api/preview?from=${from}&to=${to}`),
   options: () => req<{ types: Option[]; layouts: Option[] }>('GET', '/api/mariana/options'),
   saveMapping: (typeMap: Record<string, string>, layoutId: string) => req('PUT', '/api/mariana/mapping', { typeMap, layoutId, instructorIds: [] }),

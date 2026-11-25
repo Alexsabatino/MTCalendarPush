@@ -85,6 +85,19 @@ describe('LiveMariana', () => {
   })
 })
 
+describe('one-date changes API', () => {
+  it('validates and saves changes that the preview uses', async () => {
+    expect((await call('PUT', '/api/changes', [{ date: '2026-12-21', time: '06:00', level: 9 }])).status).toBe(400)
+    expect((await call('PUT', '/api/changes', [{ date: '2026-12-21', time: '06:00', level: 2, genre: 'Yoga' }])).status).toBe(400)
+    expect((await call('PUT', '/api/changes', [{ date: '2026-12-21', time: '06:00', level: 2, genre: 'Longevity' }, { date: '2026-12-21', time: '07:00', level: 1 }])).status).toBe(200)
+    const prev = (await call('GET', '/api/preview?from=2026-12-21&to=2026-12-21')).body
+    expect(prev.find((x: { time: string }) => x.time === '06:00')).toMatchObject({ genre: 'Longevity', level: 2, changed: true })
+    expect(prev.some((x: { time: string }) => x.time === '07:00')).toBe(true)
+    expect((await call('GET', '/api/state')).body.changes).toHaveLength(2)
+    await call('PUT', '/api/changes', [])
+  })
+})
+
 describe('CSV import API', () => {
   const csv = 'Date,Start,Genre,Level\n2026-12-20,07:00,Strength,3\n2026-12-20,08:00,Endurance,1\n2026-11-29,07:00,Strength,1\n'
   it('previews and pushes a whole file, skipping past rows and without duplicates', async () => {

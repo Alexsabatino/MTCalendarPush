@@ -16,6 +16,14 @@ export interface RotationConfig {
 export const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
 const weekday = (times: [string, number][]) => times.map(([time, level]) => ({ time, level }))
 
+/** A one-date change: sets the level (and optionally genre) of the class at that time, or adds a class there. */
+export interface ClassChange {
+  date: string
+  time: string
+  level: number
+  genre?: string
+}
+
 export interface SkipRule {
   date: string
   time?: string
@@ -29,6 +37,8 @@ export interface Slot {
   genre: string
   level: number
   cycleDay: number
+  /** Set when a one-date change applies. */
+  changed?: boolean
 }
 
 export const DEFAULT_CONFIG: RotationConfig = {
@@ -63,13 +73,15 @@ export function dayInfo(date: string, cfg: RotationConfig) {
 
 export const slotKey = (date: string, time: string) => `${date}T${time}`
 
-export function generateSlots(from: string, to: string, cfg: RotationConfig, skips: SkipRule[] = []): Slot[] {
+export function generateSlots(from: string, to: string, cfg: RotationConfig, skips: SkipRule[] = [], changes: ClassChange[] = []): Slot[] {
   const out: Slot[] = []
   for (let date = from; date <= to; date = addDays(date, 1)) {
     const { cycleDay, genre, weekday } = dayInfo(date, cfg)
-    for (const { time, level } of [...(cfg.weekly[weekday] ?? [])].sort((a, b) => a.time.localeCompare(b.time))) {
+    const day = new Map((cfg.weekly[weekday] ?? []).map((c) => [c.time, { genre, level: c.level, changed: false }]))
+    for (const ch of changes) if (ch.date === date) day.set(ch.time, { genre: ch.genre ?? genre, level: ch.level, changed: true })
+    for (const [time, c] of [...day].sort((a, b) => a[0].localeCompare(b[0]))) {
       if (skips.some((s) => s.date === date && (!s.time || s.time === time))) continue
-      out.push({ key: slotKey(date, time), date, time, genre, level, cycleDay })
+      out.push({ key: slotKey(date, time), date, time, genre: c.genre, level: c.level, cycleDay, ...(c.changed ? { changed: true } : {}) })
     }
   }
   return out

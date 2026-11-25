@@ -86,3 +86,9 @@ table.preview { border-collapse: collapse; width: 100%; font-size: 13px; }
 .gridimport[open] { padding-bottom: 14px; }
 .gridimport textarea { width: 100%; font: inherit; font-size: 13px; }
 .gridimport .ok { color: #1f7a45; }
+.pushbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding: 12px 16px; }
+.pushbar.pending { border-color: #e0a100; background: #fffaf0; }
+.classes.edit li { align-items: center; }
+.classes.edit select { padding: 4px 6px; }
+.classes li.cancelled b { color: #a3361b; }
+.dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: #e0a100; margin-left: 4px; vertical-align: middle; }

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { importWeeklyGrid } from '../shared/weeklyGrid'
-import { addDays, dayInfo, typeKey, weekdayOf, WEEKDAYS, type ClassTemplate, type RotationConfig, type SkipRule } from '../shared/rotation'
+import { addDays, dayInfo, typeKey, weekdayOf, WEEKDAYS, type ClassChange, type ClassTemplate, type RotationConfig, type SkipRule } from '../shared/rotation'
 import { api, type AppState, type LogEntry, type Option, type ImportPlan, type Plan, type PreviewSlot, type PushResult } from './api'
 
 type Tab = 'calendar' | 'settings' | 'mariana' | 'import' | 'activity'
@@ -28,7 +28,7 @@ export default function App() {
         ))}
       </nav>
       <main>
-        {tab === 'calendar' && <CalendarView state={state} />}
+        {tab === 'calendar' && <CalendarView state={state} onChanged={reload} goMapping={() => setTab('mariana')} />}
         {tab === 'settings' && <Settings state={state} onSaved={reload} />}
         {tab === 'mariana' && <Mariana state={state} onChanged={reload} />}
         {tab === 'import' && <ImportCsv state={state} onChanged={reload} goMapping={() => setTab('mariana')} />}
@@ -38,21 +38,107 @@ export default function App() {
   )
 }
 
-function CalendarView({ state }: { state: AppState }) {
+function PushBar({ state, version, goMapping, onPushed }: { state: AppState; version: number; goMapping: () => void; onPushed: () => void }) {
+  const lastEdit = [...state.changes.map((c) => c.date), ...state.skips.map((s) => s.date)].sort().at(-1) ?? state.today
+  const from = state.today
+  const to = [addDays(state.today, 27), lastEdit].sort().at(-1)!
+  const [plan, setPlan] = useState<Plan | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [msg, setMsg] = useState('')
+  useEffect(() => { api.plan(from, to).then(setPlan).catch(() => setPlan(null)) }, [from, to, version])
+  if (!plan) return null
+  const n = plan.create.length + plan.update.length + plan.remove.length
+  const notReady = !state.layoutId || plan.missingTypes.length > 0
+  const push = async () => {
+    if (!confirm(`Push ${n} change(s) for ${fmtDate(from)} – ${fmtDate(to)} to ${state.connection.mode === 'live' ? 'Mariana Tek' : 'the demo studio'}?`)) return
+    setBusy(true)
+    try { const r = await api.apply(from, to); setMsg(`Pushed: ${r.created} created, ${r.updated} changed, ${r.removed} removed${r.flagged.length ? `, ${r.flagged.length} need staff attention (booked)` : ''}.`); onPushed() } catch (e) { setMsg((e as Error).message) } finally { setBusy(false) }
+  }
+  return (
+    <section className={`card pushbar ${n ? 'pending' : ''}`}>
+      <div>
+        <b>{n ? `${n} change${n === 1 ? '' : 's'} not in Mariana Tek yet` : 'Mariana Tek is up to date'}</b>
+        <span className="muted"> · {fmtDate(from)} – {fmtDate(to)}{n ? ` · ${plan.create.length} new, ${plan.update.length} changed, ${plan.remove.length} removed` : ''}</span>
+        {msg && <div className="msg">{msg}</div>}
+      </div>
+      {notReady ? <button className="ghost" onClick={goMapping}>Match class types first</button>
+        : <button className="primary" disabled={busy || !n} onClick={push}>Push changes</button>}
+    </section>
+  )
+}
+
+function DayEditor2({ date, state, slots, onSaved }: { date: string; state: AppState; slots: PreviewSlot[]; onSaved: () => void }) {
+  const cfg = state.config
+  const rotationGenre = dayInfo(date, cfg).genre
+  const [time, setTime] = useState('')
+  const [level, setLevel] = useState(1)
+  const [err, setErr] = useState('')
+  const past = date < state.today
+  const save = async (changes: ClassChange[], skips: SkipRule[] = state.skips) => {
+    setErr('')
+    try { await api.saveChanges(changes); if (skips !== state.skips) await api.saveSkips(skips); onSaved() } catch (e) { setErr((e as Error).message) }
+  }
+  const setClass = (t: string, lvl: number, genre: string) => {
+    const template = cfg.weekly[weekdayOf(date)].find((c) => c.time === t)
+    const rest = state.changes.filter((c) => !(c.date === date && c.time === t))
+    const same = template && template.level === lvl && genre === rotationGenre
+    save(same ? rest : [...rest, { date, time: t, level: lvl, ...(genre !== rotationGenre ? { genre } : {}) }])
+  }
+  const cancel = (t: string) => {
+    const isAdded = !cfg.weekly[weekdayOf(date)].some((c) => c.time === t)
+    const changes = state.changes.filter((c) => !(c.date === date && c.time === t))
+    save(changes, isAdded ? state.skips : [...state.skips, { date, time: t }])
+  }
+  const restore = (t?: string) => save(state.changes, state.skips.filter((s) => !(s.date === date && s.time === t)))
+  const cancelled = state.skips.filter((s) => s.date === date)
+  return (
+    <>
+      <ul className="classes edit">
+        {slots.map((s) => (
+          <li key={s.key}>
+            <span>{fmtTime(s.time)} – {fmtTime(s.end)}</span>
+            {past ? <b>{s.genre} {s.level}</b> : <span className="row">
+              <select aria-label={`${s.time} genre`} value={s.genre} onChange={(e) => setClass(s.time, s.level, e.target.value)}>{cfg.genres.map((g) => <option key={g}>{g}</option>)}</select>
+              <select aria-label={`${s.time} level`} value={s.level} onChange={(e) => setClass(s.time, Number(e.target.value), s.genre)}>{Array.from({ length: cfg.levels }, (_, l) => <option key={l} value={l + 1}>Level {l + 1}</option>)}</select>
+              <button className="ghost" onClick={() => cancel(s.time)} aria-label={`Cancel ${s.time}`}>Cancel</button>
+            </span>}
+            <em className={s.mtId ? 'ok' : ''}>{s.changed ? 'Changed for this date · ' : ''}{s.mtId ? 'In Mariana Tek' : 'Not pushed'}</em>
+          </li>
+        ))}
+        {cancelled.map((c, i) => (
+          <li key={`x${i}`} className="cancelled"><span>{c.time ? fmtTime(c.time) : 'Whole day'}</span><b>Cancelled</b>{!past && <button className="ghost" onClick={() => restore(c.time)}>Restore</button>}</li>
+        ))}
+        {!slots.length && !cancelled.length && <li className="muted">No classes.</li>}
+      </ul>
+      {!past && <div className="row wrap adder">
+        <input type="time" value={time} onChange={(e) => setTime(e.target.value)} aria-label="Extra class time" />
+        <select value={level} onChange={(e) => setLevel(Number(e.target.value))} aria-label="Extra class level">{Array.from({ length: cfg.levels }, (_, l) => <option key={l} value={l + 1}>Level {l + 1}</option>)}</select>
+        <button disabled={!time || slots.some((s) => s.time === time)} onClick={() => { setClass(time, level, rotationGenre); setTime('') }}>Add class this date</button>
+      </div>}
+      <p className="muted">Changes here apply to this date only. To change every {WEEKDAYS[weekdayOf(date)]}, use the Weekly schedule tab.</p>
+      {err && <p className="warn">{err}</p>}
+    </>
+  )
+}
+
+function CalendarView({ state, onChanged, goMapping }: { state: AppState; onChanged: () => void; goMapping: () => void }) {
   const cfg = state.config
   const [month, setMonth] = useState(state.today.slice(0, 7))
   const [selected, setSelected] = useState(state.today)
   const [slots, setSlots] = useState<PreviewSlot[]>([])
+  const [version, setVersion] = useState(0)
   const first = `${month}-01`
   const gridStart = addDays(first, -new Date(`${first}T12:00:00Z`).getUTCDay())
   const days = Array.from({ length: 42 }, (_, i) => addDays(gridStart, i))
-  useEffect(() => { api.preview(days[0], days[41]).then(setSlots) }, [month, cfg]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { api.preview(days[0], days[41]).then(setSlots) }, [month, cfg, state.changes, state.skips, version]) // eslint-disable-line react-hooks/exhaustive-deps
   const byDate = useMemo(() => { const m = new Map<string, PreviewSlot[]>(); for (const s of slots) m.set(s.date, [...(m.get(s.date) ?? []), s]); return m }, [slots])
   const shift = (n: number) => { const [y, m] = month.split('-').map(Number); const d = new Date(Date.UTC(y, m - 1 + n, 1)); setMonth(d.toISOString().slice(0, 7)) }
   const upcoming = Array.from({ length: 9 }, (_, i) => addDays(state.today, i))
   const sel = dayInfo(selected, cfg)
+  const refresh = () => { setVersion((v) => v + 1); onChanged() }
   return (
     <div className="stack">
+      <PushBar state={state} version={version} goMapping={goMapping} onPushed={refresh} />
       <section className="card">
         <h2>Next 9 days</h2>
         <div className="strip">
@@ -73,25 +159,20 @@ function CalendarView({ state }: { state: AppState }) {
           </div>
           <div className="grid">
             {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((d) => <div key={d} className="dow">{d}</div>)}
-            {days.map((d) => { const i = dayInfo(d, cfg); const n = byDate.get(d)?.length ?? 0; return (
+            {days.map((d) => { const i = dayInfo(d, cfg); const list = byDate.get(d) ?? []; const n = list.length; const edited = list.some((s) => s.changed) || state.skips.some((s) => s.date === d); return (
               <button key={d} className={`day ${d.slice(0, 7) !== month ? 'out' : ''} ${d === state.today ? 'today' : ''} ${d === selected ? 'sel' : ''}`} onClick={() => setSelected(d)} aria-label={`${fmtDate(d)}: ${i.genre}`}>
-                <span className="num">{Number(d.slice(8))}</span>
+                <span className="num">{Number(d.slice(8))}{edited && <i className="dot" title="Changed for this date" />}</span>
                 <span className="tag" style={{ background: genreColor(cfg, i.genre) }}>{i.genre}</span>
                 <span className="count">{n} {n === 1 ? 'class' : 'classes'}</span>
               </button>) })}
           </div>
-          <div className="legend">{cfg.genres.map((g) => <span key={g}><i style={{ background: genreColor(cfg, g) }} />{g}</span>)}</div>
+          <div className="legend">{cfg.genres.map((g) => <span key={g}><i style={{ background: genreColor(cfg, g) }} />{g}</span>)}<span><i className="dot" /> changed for that date</span></div>
         </section>
         <section className="card">
           <h2>{fmtDate(selected, { weekday: 'long', month: 'long', day: 'numeric' })}</h2>
           <p className="big" style={{ color: genreColor(cfg, sel.genre) }}>{sel.genre}</p>
-          <p className="muted">Rotation day {sel.cycleDay} of {cfg.genres.length} · same times and levels every {WEEKDAYS[sel.weekday]}</p>
-          <ul className="classes">
-            {(byDate.get(selected) ?? []).map((s) => (
-              <li key={s.key}><span>{fmtTime(s.time)} – {fmtTime(s.end)}</span><b>{s.genre} {s.level}</b><em className={s.mtId ? 'ok' : ''}>{s.mtId ? 'In Mariana Tek' : 'Not pushed'}</em></li>
-            ))}
-            {!byDate.get(selected)?.length && <li className="muted">No classes (skipped or no class times set).</li>}
-          </ul>
+          <p className="muted">Rotation day {sel.cycleDay} of {cfg.genres.length} · times and levels from the {WEEKDAYS[sel.weekday]} schedule</p>
+          <DayEditor2 key={selected} date={selected} state={state} slots={byDate.get(selected) ?? []} onSaved={refresh} />
         </section>
       </div>
     </div>

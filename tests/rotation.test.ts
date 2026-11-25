@@ -32,6 +32,15 @@ describe('rotation', () => {
     const s = generateSlots('2026-12-01', '2026-12-02', cfg, [{ date: '2026-12-01', time: '09:00' }, { date: '2026-12-02' }])
     expect(s.map((x) => x.key)).toEqual(['2026-12-01T06:00'])
   })
+  it('applies one-date changes: new level/genre, or an extra class', () => {
+    const s = generateSlots('2026-12-01', '2026-12-08', cfg, [], [
+      { date: '2026-12-01', time: '09:00', level: 3, genre: 'Longevity' },
+      { date: '2026-12-01', time: '07:30', level: 1 },
+    ])
+    expect(s.filter((x) => x.date === '2026-12-01').map((x) => `${x.time} ${x.genre} ${x.level} ${!!x.changed}`)).toEqual([
+      '06:00 Strength 1 false', '07:30 Strength 1 true', '09:00 Longevity 3 true'])
+    expect(s.find((x) => x.key === '2026-12-08T09:00')).toMatchObject({ level: 2, genre: 'Endurance' })
+  })
   it('computes 50-minute end times', () => {
     expect(endTime('06:00', 50)).toBe('06:50')
     expect(endTime('17:30', 50)).toBe('18:20')
