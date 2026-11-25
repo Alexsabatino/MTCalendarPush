@@ -29,6 +29,17 @@ Open the `Local:` link it prints. Without Mariana Tek credentials it runs in **d
 3. **Mariana Tek:** match each genre/level to a Mariana Tek class type and pick the room layout, choose how far ahead to schedule, preview the changes, then push. A CSV export is also available.
 4. **Import CSV:** upload a whole schedule and push it in one go. The file replaces the rotation for the classes it lists.
 
+### Importing a schedule (e.g. from Gemini)
+
+The **Import schedule** tab takes the schedule spreadsheet as CSV and pushes it to Mariana Tek. To change something later, edit the same sheet and upload it again: the tool compares it with the classes it already created and pushes only the new, changed and removed classes (removal is limited to the file's first–last date and can be turned off). Booked and past classes are never touched.
+
+Two layouts are accepted:
+
+- **Grid:** class times down the first column, days across the top, `Level 1/2/3` in each cell (emoji, percentages and `-` are ignored). Headers can be dates (`Mon 12/7`, `Dec 7`, `2026-12-07`) or plain day names plus a "Week 1 starts on" date. Several weeks can be stacked, each with its own header row. See `examples/gemini-3-weeks.csv`.
+- **One row per class:** described below.
+
+The genre comes from the file if a cell, header, genre row or Genre column names one; otherwise from the genre rotation (Day 1 date + genre order on the Weekly schedule tab).
+
 ### CSV format
 
 | Date | Start | Genre | Level |

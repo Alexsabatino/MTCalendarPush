@@ -23,7 +23,7 @@ export default function App() {
         <span className={`conn ${state.connection.mode}`} title={state.connection.label}>{state.connection.mode === 'live' ? `Mariana Tek: ${state.connection.label}` : 'Demo mode, not connected to Mariana Tek'}</span>
       </header>
       <nav>
-        {([['calendar', 'Calendar'], ['settings', 'Weekly schedule & rotation'], ['mariana', 'Mariana Tek'], ['import', 'Import CSV'], ['activity', 'Activity']] as const).map(([id, label]) => (
+        {([['calendar', 'Calendar'], ['settings', 'Weekly schedule & rotation'], ['mariana', 'Mariana Tek'], ['import', 'Import schedule'], ['activity', 'Activity']] as const).map(([id, label]) => (
           <button key={id} className={tab === id ? 'on' : ''} onClick={() => setTab(id)}>{label}</button>
         ))}
       </nav>
@@ -331,57 +331,66 @@ function ImportCsv({ state, onChanged, goMapping }: { state: AppState; onChanged
   const cfg = state.config
   const [csv, setCsv] = useState('')
   const [fileName, setFileName] = useState('')
-  const [removeMissing, setRemoveMissing] = useState(false)
+  const [removeMissing, setRemoveMissing] = useState(true)
+  const [weekStart, setWeekStart] = useState('')
   const [plan, setPlan] = useState<ImportPlan | null>(null)
   const [result, setResult] = useState<PushResult | null>(null)
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
   const run = async (fn: () => Promise<void>) => { setBusy(true); setErr(''); try { await fn() } catch (e) { setErr((e as Error).message) } finally { setBusy(false) } }
-  const check = (text: string, remove: boolean) => run(async () => { setResult(null); setPlan(await api.importPlan(text, remove)) })
+  const check = (text: string, remove = removeMissing, ws = weekStart) => run(async () => { setResult(null); setPlan(await api.importPlan(text, remove, ws)) })
   const onFile = async (f: File | undefined) => {
     if (!f) return
     const text = await f.text()
-    setCsv(text); setFileName(f.name); check(text, removeMissing)
+    setCsv(text); setFileName(f.name); check(text)
   }
   const changes = plan ? plan.create.length + plan.update.length + plan.remove.length : 0
   const notReady = !state.layoutId || (plan?.missingTypes.length ?? 0) > 0
   const push = () => run(async () => {
     if (!confirm(`Push ${changes} change(s) from ${fileName || 'the file'} to ${state.connection.mode === 'live' ? state.connection.label : 'the demo studio'}?`)) return
-    setResult(await api.importApply(csv, removeMissing)); setPlan(await api.importPlan(csv, removeMissing)); onChanged()
+    setResult(await api.importApply(csv, removeMissing, weekStart)); setPlan(await api.importPlan(csv, removeMissing, weekStart)); onChanged()
   })
   const sample = `Date,Start,Genre,Level\n${cfg.startDate},06:00,${cfg.genres[0]},1\n${cfg.startDate},9:00 AM,${cfg.genres[0]},1\n`
   return (
     <div className="stack">
       <section className="card form">
-        <h2>Import a schedule from CSV</h2>
-        <p className="muted">Upload a spreadsheet of classes and push them all to Mariana Tek at once. This ignores the rotation settings: the file is the schedule.</p>
-        <div className="field"><span>Columns</span>
-          <p className="muted"><b>Date</b> (2026-12-01 or 12/1/2026), <b>Start</b> (06:00 or 6:00 AM), and either <b>Genre</b> + <b>Level</b> or a <b>Class name</b> like "{cfg.genres[0]} 2". Genres: {cfg.genres.join(', ')}; levels 1–{cfg.levels}. Other columns are ignored, so a CSV downloaded from the Mariana Tek tab works as-is.</p>
+        <h2>Import a schedule</h2>
+        <p className="muted">Upload the schedule spreadsheet (for example, the one Gemini makes) and push it to Mariana Tek. If something changes, edit the same sheet and upload it again: only the differences are pushed.</p>
+        <div className="field"><span>Accepted layouts</span>
+          <ul className="muted bullets">
+            <li><b>Grid:</b> class times down the first column, days across the top, "Level 1/2/3" in each cell. Headers can be dates ("Mon 12/1", "Dec 1") or day names plus the week 1 start date below. Several weeks can be stacked, each with its own header row. Emoji, percentages and "-" are ignored.</li>
+            <li><b>One row per class:</b> <b>Date</b>, <b>Start</b>, and <b>Level</b>, plus <b>Genre</b> or a <b>Class name</b> like "{cfg.genres[0]} 2".</li>
+            <li><b>Genre:</b> taken from the file when a cell, header or column names one ({cfg.genres.join(', ')}); otherwise from your genre rotation.</li>
+          </ul>
           <div className="row wrap">
-            <a className="btn ghost" href={`data:text/csv;charset=utf-8,${encodeURIComponent(sample)}`} download="schedule-template.csv">Download template</a>
+            <a className="btn ghost" href={`data:text/csv;charset=utf-8,${encodeURIComponent(sample)}`} download="schedule-template.csv">Download row template</a>
           </div>
         </div>
-        <label>CSV file<input type="file" accept=".csv,text/csv" onChange={(e) => onFile(e.target.files?.[0])} /></label>
+        <label>Schedule file (CSV)<input type="file" accept=".csv,.tsv,.txt,text/csv" onChange={(e) => { onFile(e.target.files?.[0]); e.target.value = '' }} /></label>
+        {(plan?.needsWeekStart || weekStart) && (
+          <label>Week 1 starts on<input type="date" value={weekStart} onChange={(e) => { setWeekStart(e.target.value); if (csv) check(csv, removeMissing, e.target.value) }} /></label>
+        )}
         <label className="inline"><input type="checkbox" checked={removeMissing} onChange={(e) => { setRemoveMissing(e.target.checked); if (csv) check(csv, e.target.checked) }} />
-          Also remove classes this tool created, between the file's first and last date, that aren't in the file</label>
+          Remove classes that were taken out of the file (only between its first and last date)</label>
         {plan && (
           <div className="plan">
-            <p><b>{fileName}</b>: {plan.rows} class{plan.rows === 1 ? '' : 'es'}{plan.from ? `, ${fmtDate(plan.from)} – ${fmtDate(plan.to!)}` : ''}{plan.past ? `. ${plan.past} already in the past will be skipped` : ''}.</p>
+            <p><b>{fileName}</b>: {plan.rows} class{plan.rows === 1 ? '' : 'es'}{plan.from ? `, ${fmtDate(plan.from)} – ${fmtDate(plan.to!)}` : ''}{plan.past ? `. ${plan.past} already in the past will be skipped` : ''}.
+              {plan.genreFromRotation > 0 && <> Genre for {plan.genreFromRotation === plan.rows ? 'all' : plan.genreFromRotation} of them comes from your rotation (Day 1 = {fmtDate(cfg.startDate)}).</>}</p>
             {plan.errors.length > 0 && <>
-              <p className="warn">{plan.errors.length} row{plan.errors.length === 1 ? '' : 's'} need fixing before you can push:</p>
-              <ul className="list errors">{plan.errors.slice(0, 50).map((e) => <li key={e.row}>{e.row ? `Row ${e.row}: ` : ''}{e.message}</li>)}{plan.errors.length > 50 && <li className="muted">…and {plan.errors.length - 50} more</li>}</ul>
+              <p className="warn">{plan.needsWeekStart ? 'One more step:' : `${plan.errors.length} row${plan.errors.length === 1 ? '' : 's'} need fixing before you can push:`}</p>
+              <ul className="list errors">{plan.errors.slice(0, 50).map((e, i) => <li key={i}>{e.row ? `Row ${e.row}: ` : ''}{e.message}</li>)}{plan.errors.length > 50 && <li className="muted">…and {plan.errors.length - 50} more</li>}</ul>
             </>}
             {plan.missingTypes.length > 0 && <p className="warn">Not matched to a Mariana Tek class type yet: {plan.missingTypes.join(', ')}. <button className="ghost" onClick={goMapping}>Match class types</button></p>}
             {!state.layoutId && <p className="warn">No room layout chosen yet. <button className="ghost" onClick={goMapping}>Choose one</button></p>}
             <div className="stats"><span><b>{plan.create.length}</b> to create</span><span><b>{plan.update.length}</b> to change</span><span><b>{plan.remove.length}</b> to remove</span><span><b>{plan.unchanged}</b> already correct</span></div>
-            <details><summary>See the changes</summary><ul className="list">
+            <details open={changes > 0 && changes <= 30}><summary>See the changes</summary><ul className="list">
               {plan.create.map((s) => <li key={s.key}>+ {fmtDate(s.date)} {fmtTime(s.time)} · {s.genre} {s.level}</li>)}
               {plan.update.map((u) => <li key={u.slot.key}>~ {fmtDate(u.slot.date)} {fmtTime(u.slot.time)} · {u.from} → {u.slot.genre} L{u.slot.level}</li>)}
               {plan.remove.map((r) => <li key={r.key}>− {fmtDate(r.key.slice(0, 10))} {fmtTime(r.key.slice(11))} · {r.genre} L{r.level}</li>)}
             </ul></details>
-            <p className="muted">Classes with bookings are never changed or removed automatically, and past classes are never touched. Pushing the same file again makes no duplicates.</p>
+            <p className="muted">Compared with the classes this tool has already put in Mariana Tek. Classes with bookings are never changed or removed automatically, and past classes are never touched. Uploading the same file again changes nothing.</p>
             <button className="primary" disabled={busy || plan.errors.length > 0 || notReady || changes === 0} onClick={push}>
-              {state.connection.mode === 'live' ? 'Push whole schedule to Mariana Tek' : 'Push whole schedule to demo studio'}</button>
+              {changes === 0 && plan.rows > 0 && !plan.errors.length ? 'Mariana Tek already matches this file' : `Push ${changes} change${changes === 1 ? '' : 's'} to ${state.connection.mode === 'live' ? 'Mariana Tek' : 'demo studio'}`}</button>
           </div>
         )}
         {result && <PushResultView result={result} />}

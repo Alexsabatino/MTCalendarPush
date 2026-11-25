@@ -134,10 +134,10 @@ export function createApp({ store, client, now = () => new Date() }: AppOptions)
     res.json(await applyPlan(p, `Rotation ${from} to ${to}`))
   })
 
-  const importBody = z.object({ csv: z.string().max(2_000_000), removeMissing: z.boolean().default(false) })
-  const importPlan = (csv: string, removeMissing: boolean) => {
+  const importBody = z.object({ csv: z.string().max(2_000_000), removeMissing: z.boolean().default(false), weekStart: date.optional() })
+  const importPlan = (csv: string, removeMissing: boolean, weekStart?: string) => {
     const cfg = store.data.config
-    const parsed = importSchedule(csv, cfg.genres, cfg.levels)
+    const parsed = importSchedule(csv, cfg.genres, cfg.levels, { rotation: cfg, weekStart, today: todayIn(cfg.timeZone, now()) })
     const nk = nowKey()
     const past = parsed.slots.filter((s) => s.key <= nk).length
     const p = parsed.from && parsed.to
@@ -148,9 +148,10 @@ export function createApp({ store, client, now = () => new Date() }: AppOptions)
   }
 
   app.post('/api/import/plan', (req, res) => {
-    const { csv, removeMissing } = importBody.parse(req.body)
-    const { parsed, past, p } = importPlan(csv, removeMissing)
+    const { csv, removeMissing, weekStart } = importBody.parse(req.body)
+    const { parsed, past, p } = importPlan(csv, removeMissing, weekStart)
     res.json({
+      format: parsed.format, needsWeekStart: !!parsed.needsWeekStart, genreFromRotation: parsed.genreFromRotation ?? 0,
       rows: parsed.slots.length, errors: parsed.errors, from: parsed.from, to: parsed.to, past,
       create: p.create, update: p.update.map((u) => ({ slot: u.slot, mtId: u.pushed.mtId, from: `${u.pushed.genre} L${u.pushed.level}` })),
       remove: p.remove, unchanged: p.unchanged, missingTypes: p.missingTypes,
@@ -158,8 +159,8 @@ export function createApp({ store, client, now = () => new Date() }: AppOptions)
   })
 
   app.post('/api/import/apply', async (req, res) => {
-    const { csv, removeMissing } = importBody.parse(req.body)
-    const { parsed, p } = importPlan(csv, removeMissing)
+    const { csv, removeMissing, weekStart } = importBody.parse(req.body)
+    const { parsed, p } = importPlan(csv, removeMissing, weekStart)
     if (parsed.errors.length) return res.status(400).json({ error: `Fix the ${parsed.errors.length} row error(s) in the file first.` })
     if (!parsed.slots.length) return res.status(400).json({ error: 'The file has no classes.' })
     const err = readyError(p)

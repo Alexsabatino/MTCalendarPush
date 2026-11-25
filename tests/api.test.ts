@@ -101,6 +101,15 @@ describe('CSV import API', () => {
     const r = await call('POST', '/api/import/apply', { csv: next, removeMissing: true })
     expect(r.body).toMatchObject({ updated: 1, removed: 1 })
   })
+  it('re-uploading an edited grid pushes only the differences', async () => {
+    const grid = (wed: string, thu: string) => `Time,Wed 12/23/2026,Thu 12/24/2026\n6:15 AM,"🟢 Level 1\n40%",${wed}\n7:15 AM,Level 2,${thu}\n`
+    expect((await call('POST', '/api/import/apply', { csv: grid('Level 3', 'Level 1'), removeMissing: true })).body).toMatchObject({ created: 4 })
+    const plan = (await call('POST', '/api/import/plan', { csv: grid('Level 2', '-'), removeMissing: true })).body
+    expect(plan).toMatchObject({ format: 'grid', unchanged: 2, create: [] })
+    expect(plan.update.map((u: { slot: { key: string } }) => u.slot.key)).toEqual(['2026-12-24T06:15'])
+    expect(plan.remove.map((r: { key: string }) => r.key)).toEqual(['2026-12-24T07:15'])
+    expect((await call('POST', '/api/import/apply', { csv: grid('Level 2', '-'), removeMissing: true })).body).toMatchObject({ created: 0, updated: 1, removed: 1 })
+  })
   it('refuses to push a file with row errors', async () => {
     const r = await call('POST', '/api/import/apply', { csv: 'Date,Start,Genre,Level\nnope,07:00,Strength,1\n' })
     expect(r.status).toBe(400)

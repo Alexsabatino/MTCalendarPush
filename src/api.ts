@@ -8,7 +8,7 @@ export type PreviewSlot = Slot & { end: string; mtId: string | null }
 export interface Option { id: string; name: string; detail?: string }
 export interface Plan { create: Slot[]; update: { slot: Slot; mtId: string; from: string }[]; remove: { key: string; mtId: string; genre: string; level: number }[]; unchanged: number; missingTypes: string[] }
 export interface PushResult { created: number; updated: number; removed: number; flagged: { key: string; mtId: string; reason: string }[]; errors: string[] }
-export interface ImportPlan extends Plan { rows: number; errors: { row: number; message: string }[]; from: string | null; to: string | null; past: number }
+export interface ImportPlan extends Plan { format?: 'rows' | 'grid'; needsWeekStart: boolean; genreFromRotation: number; rows: number; errors: { row: number; message: string }[]; from: string | null; to: string | null; past: number }
 export interface LogEntry { at: string; action: string; detail: string }
 
 async function req<T>(method: string, path: string, body?: unknown): Promise<T> {
@@ -27,8 +27,8 @@ export const api = {
   saveMapping: (typeMap: Record<string, string>, layoutId: string) => req('PUT', '/api/mariana/mapping', { typeMap, layoutId, instructorIds: [] }),
   plan: (from: string, to: string) => req<Plan>('POST', '/api/sync/plan', { from, to }),
   apply: (from: string, to: string) => req<PushResult>('POST', '/api/sync/apply', { from, to }),
-  importPlan: (csv: string, removeMissing: boolean) => req<ImportPlan>('POST', '/api/import/plan', { csv, removeMissing }),
-  importApply: (csv: string, removeMissing: boolean) => req<PushResult>('POST', '/api/import/apply', { csv, removeMissing }),
+  importPlan: (csv: string, removeMissing: boolean, weekStart?: string) => req<ImportPlan>('POST', '/api/import/plan', { csv, removeMissing, weekStart: weekStart || undefined }),
+  importApply: (csv: string, removeMissing: boolean, weekStart?: string) => req<PushResult>('POST', '/api/import/apply', { csv, removeMissing, weekStart: weekStart || undefined }),
   log: () => req<LogEntry[]>('GET', '/api/log'),
   resetDemo: () => req('POST', '/api/demo/reset'),
   csvUrl: (from: string, to: string) => `/api/export.csv?from=${from}&to=${to}`,
