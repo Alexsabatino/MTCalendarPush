@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { importWeeklyGrid } from '../shared/weeklyGrid'
 import { addDays, dayInfo, typeKey, weekdayOf, WEEKDAYS, type ClassTemplate, type RotationConfig, type SkipRule } from '../shared/rotation'
 import { api, type AppState, type LogEntry, type Option, type ImportPlan, type Plan, type PreviewSlot, type PushResult } from './api'
 
@@ -132,6 +133,30 @@ function DayEditor({ day, classes, levels, onChange, onCopy }: { day: number; cl
   )
 }
 
+function GridImport({ levels, onApply }: { levels: number; onApply: (weekly: (ClassTemplate[] | null)[]) => void }) {
+  const [text, setText] = useState('')
+  const [result, setResult] = useState<ReturnType<typeof importWeeklyGrid> | null>(null)
+  const read = (t: string) => {
+    const r = importWeeklyGrid(t, levels)
+    setResult(r)
+    if (!r.errors.length && r.classes) onApply(r.weekly)
+  }
+  return (
+    <details className="gridimport">
+      <summary>Import from a spreadsheet</summary>
+      <p className="muted">Use a sheet with times down the first column and days across the top, with "Level 1/2/3" in each cell. Emoji, percentages and other text are ignored; a blank or "-" cell means no class. In Google Sheets, use File → Download → CSV, or select the cells (including the header row) and copy them.</p>
+      <label>CSV file<input type="file" accept=".csv,.tsv,.txt,text/csv" onChange={async (e) => { const f = e.target.files?.[0]; if (f) read(await f.text()); e.target.value = '' }} /></label>
+      <label>Or paste the cells here<textarea rows={4} value={text} onChange={(e) => setText(e.target.value)} placeholder={'Time\tMonday\tTuesday …\n6:15 AM\tLevel 1\tLevel 2 …'} /></label>
+      <button disabled={!text.trim()} onClick={() => read(text)}>Read pasted cells</button>
+      {result && (result.errors.length ? (
+        <div className="warn"><b>Nothing changed. Fix these and try again:</b><ul>{result.errors.slice(0, 20).map((e, i) => <li key={i}>{e}</li>)}</ul></div>
+      ) : result.classes ? (
+        <p className="ok">Filled in {result.classes} classes for {result.days.join(', ')}.{result.days.length < 7 ? ' Days not in the sheet kept their current schedule.' : ''} Check below, then click Save settings.</p>
+      ) : <p className="warn">No classes found. Make sure cells say "Level 1", "Level 2" or "Level 3".</p>)}
+    </details>
+  )
+}
+
 function Settings({ state, onSaved }: { state: AppState; onSaved: () => void }) {
   const [cfg, setCfg] = useState<RotationConfig>(state.config)
   const [skips, setSkips] = useState<SkipRule[]>(state.skips)
@@ -152,6 +177,7 @@ function Settings({ state, onSaved }: { state: AppState; onSaved: () => void }) 
       <section className="card form">
         <h2>1. Weekly schedule</h2>
         <p className="muted">Set each day's class times and levels. Every Monday gets Monday's schedule, and so on. {perWeek} classes a week.</p>
+        <GridImport levels={cfg.levels} onApply={(w) => set({ weekly: cfg.weekly.map((c, i) => w[i] ?? c) })} />
         {DAY_ORDER.map((d) => <DayEditor key={d} day={d} classes={cfg.weekly[d]} levels={cfg.levels} onChange={(c) => setDay(d, c)} onCopy={(t) => copyDay(d, t)} />)}
         <div className="two">
           <label>Number of levels<input type="number" min={1} max={10} value={cfg.levels} onChange={(e) => set({ levels: Number(e.target.value) })} /></label>

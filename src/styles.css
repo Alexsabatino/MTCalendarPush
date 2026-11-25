@@ -81,3 +81,8 @@ summary { cursor: pointer; font-size: 14px; }
 table.preview { border-collapse: collapse; width: 100%; font-size: 13px; }
 .preview th, .preview td { padding: 6px 8px; border-bottom: 1px solid var(--line); text-align: left; white-space: nowrap; }
 @media (max-width: 800px) { .dayrow { grid-template-columns: 1fr; } .dayrow .adder { grid-column: 1; } }
+.gridimport { border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px; margin: 8px 0; display: grid; gap: 10px; }
+.gridimport summary { cursor: pointer; font-weight: 600; }
+.gridimport[open] { padding-bottom: 14px; }
+.gridimport textarea { width: 100%; font: inherit; font-size: 13px; }
+.gridimport .ok { color: #1f7a45; }

@@ -3,10 +3,11 @@ import { slotKey, type Slot } from './rotation'
 export interface ImportRowError { row: number; message: string }
 export interface ImportResult { slots: Slot[]; errors: ImportRowError[]; from: string | null; to: string | null }
 
-export function parseCsv(text: string): string[][] {
+export function parseCsv(text: string, delimiter?: string): string[][] {
   const rows: string[][] = []
   let row: string[] = [], field = '', quoted = false
   const src = text.replace(/^\uFEFF/, '')
+  const delim = delimiter ?? ((src.split(/\r?\n/)[0] ?? '').includes('\t') ? '\t' : ',')
   for (let i = 0; i < src.length; i++) {
     const c = src[i]
     if (quoted) {
@@ -14,7 +15,7 @@ export function parseCsv(text: string): string[][] {
       else if (c === '"') quoted = false
       else field += c
     } else if (c === '"') quoted = true
-    else if (c === ',') { row.push(field); field = '' }
+    else if (c === delim) { row.push(field); field = '' }
     else if (c === '\n' || c === '\r') {
       if (c === '\r' && src[i + 1] === '\n') i++
       row.push(field); rows.push(row); row = []; field = ''

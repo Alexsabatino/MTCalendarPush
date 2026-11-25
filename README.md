@@ -7,6 +7,8 @@ How the schedule is built:
 1. **Weekly schedule:** for each day of the week, set the class times and each class's level. Every Monday uses Monday's times and levels, and so on.
 2. **Genre rotation:** the genre moves to the next one every calendar day (Strength → Endurance → Longevity → Strength …), starting from the Day 1 date. The studio is open every day, so weekends and holidays count. Every class that day gets that day's genre.
 
+**Importing your weekly grid:** on the Weekly schedule tab, open **Import from a spreadsheet**. Use a sheet with times down the first column (e.g. `6:15 AM`) and day names across the top row, and `Level 1/2/3` somewhere in each cell. Emoji, percentages and other text are ignored; blank or `-` means no class. Upload it as CSV (Google Sheets: File → Download → CSV) or paste cells copied from the sheet. Days missing from the sheet keep their current schedule. Check the result, click **Save settings**, then push from the Mariana Tek tab.
+
 Example: if Monday is 6:00 L1 and 9:00 L3, one Monday's classes might be Strength 1 and Strength 3, the next Monday's Endurance 1 and Endurance 3. Classes are 50 minutes.
 
 ## Run it (Windows PowerShell)
